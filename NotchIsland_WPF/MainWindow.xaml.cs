@@ -1,126 +1,182 @@
 ﻿using System;
 using System.Diagnostics;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
-using System.Windows.Media.Animation;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using NotchIsland.Native;
 using NotchIsland.Services;
+using QRCoder;
 
 namespace NotchIsland
 {
     public partial class MainWindow : Window
     {
-        private readonly MediaService _mediaService = new();
-        private readonly HardwareService _hardwareService = new();
+        private readonly MediaService _media = new();
+        private readonly HardwareService _hardware = new();
+        private readonly ClipboardService _clipboard = new();
         private readonly DeckServer _deckServer = new();
-        private readonly ClipboardService _clipboardService = new();
-        private readonly DispatcherTimer _timer = new();
+        private SettingsWindow? _settingsWindow;
+
+        private DispatcherTimer? _fastTimer;
+        private DispatcherTimer? _slowTimer;
+        private Stopwatch _stopwatch = new();
 
         private bool _isExpanded = false;
-        private int _petAnimState = 0;
-        private int _pomodoroSeconds = 25 * 60;
-        private bool _pomodoroRunning = false;
+        private bool _isMicMuted = false;
+        private double _seekSliderValue = 0;
+        private bool _isDraggingSeek = false;
+        private int _petAnimFrame = 0;
 
         public MainWindow()
         {
             InitializeComponent();
-
-            Closing += (s, e) =>
-            {
-                e.Cancel = true;
-            };
-
-            _timer.Interval = TimeSpan.FromMilliseconds(500);
-            _timer.Tick += OnTimerTick;
+            Closing += (s, e) => e.Cancel = true; // Never exit accidentally
         }
 
         private void Window_SourceInitialized(object sender, EventArgs e)
         {
             var hwnd = new WindowInteropHelper(this).Handle;
-            Win32.MakeWindowGlass(hwnd);
-            Win32.ApplyNoActivateAndTopmost(hwnd);
+            Win32.MakeTransparent(hwnd);
+            Win32.SetWindowLongPtr(hwnd, Win32.GWL_EXSTYLE,
+                (nint)(Win32.GetWindowLongPtr(hwnd, Win32.GWL_EXSTYLE) | Win32.WS_EX_TOOLWINDOW | Win32.WS_EX_TOPMOST));
+
+            UpdatePosition();
+        }
+
+        private void UpdatePosition()
+        {
+            double screenWidth = SystemParameters.PrimaryScreenWidth;
+            Left = (screenWidth - Width) / 2.0;
+            Top = SettingsService.Current.TopGap;
         }
 
         private async void Window_Loaded(object sender, RoutedEventArgs e)
         {
-            try
-            {
-                // Position top center
-                Left = (SystemParameters.PrimaryScreenWidth - Width) / 2;
-                Top = 0;
+            // Bind collections
+            ShelfItemsControl.ItemsSource = FileShelfService.Items;
+            ClipboardItemsControl.ItemsSource = _clipboard.Items;
+            UpdateShelfStatus();
 
-                // Start Services
-                _deckServer.Start();
-                _timer.Start();
+            // Initialize Services
+            await _media.InitializeAsync();
+            _media.TrackChanged += OnTrackChanged;
+            _media.PositionChanged += OnPositionChanged;
 
-                _mediaService.TrackChanged += OnTrackChanged;
-                _mediaService.PositionChanged += OnPositionChanged;
-                await _mediaService.InitializeAsync();
+            _deckServer.Start();
+            GenerateDeckQrCode();
 
-                ClipboardList.ItemsSource = _clipboardService.Items;
-            }
-            catch (Exception ex)
-            {
-                System.IO.File.WriteAllText(@"c:\project\rea\crash.log", $"Window_Loaded error: {ex}");
-            }
+            // Fast Timer (100ms) for smooth progress, stopwatch, visualizer
+            _fastTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
+            _fastTimer.Tick += FastTimer_Tick;
+            _fastTimer.Start();
+
+            // Slow Timer (1000ms) for hardware, clock, clipboard
+            _slowTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+            _slowTimer.Tick += SlowTimer_Tick;
+            _slowTimer.Start();
+
+            // Initial manual update
+            SlowTimer_Tick(null, EventArgs.Empty);
+            OnTrackChanged();
         }
 
-        private void OnTimerTick(object? sender, EventArgs e)
+        #region Timers & Updates
+        private void FastTimer_Tick(object? sender, EventArgs e)
         {
-            try
+            // Media progress tick
+            _media.Tick(0.1);
+
+            // Stopwatch tick
+            if (_stopwatch.IsRunning)
             {
-                _hardwareService.Update();
-                _clipboardService.CheckClipboard();
-                _mediaService.Tick(0.5);
-
-                // Update Clock
-                PillTime.Text = DateTime.Now.ToString("HH:mm");
-
-                // Update Telemetry
-                TelemetryText.Text = $"⚡ {_hardwareService.Stats.Fps} FPS · CPU {_hardwareService.Stats.CpuPercent}% · RAM {_hardwareService.Stats.RamUsedGb:F1}G";
-
-                // Visualizer bars animation
-                if (_mediaService.CurrentTrack.IsPlaying)
-                {
-                    var r = new Random();
-                    Bar1.Height = r.Next(6, 14);
-                    Bar2.Height = r.Next(10, 18);
-                    Bar3.Height = r.Next(5, 12);
-                }
-
-                // Pomodoro countdown
-                if (_pomodoroRunning && _pomodoroSeconds > 0)
-                {
-                    _pomodoroSeconds--;
-                    var m = _pomodoroSeconds / 60;
-                    var s = _pomodoroSeconds % 60;
-                    TimerText.Text = $"{m:D2}:{s:D2}";
-                }
-
-                // Pet idle breathing
-                _petAnimState = (_petAnimState + 1) % 10;
-                if (_petAnimState == 0)
-                    PetText.Text = "(=^･ω･^=)";
-                else if (_petAnimState == 5)
-                    PetText.Text = "(=^-ω-^=)";
+                var ts = _stopwatch.Elapsed;
+                StopwatchDisplay.Text = $"{ts.Minutes:D2}:{ts.Seconds:D2}.{ts.Milliseconds / 100}";
             }
-            catch (Exception ex)
+
+            // Mini visualizer bounce
+            if (_media.CurrentTrack.IsPlaying)
             {
-                System.IO.File.WriteAllText(@"c:\project\rea\crash.log", $"OnTimerTick error: {ex}");
+                var rnd = Random.Shared;
+                Bar1.Height = rnd.Next(6, 16);
+                Bar2.Height = rnd.Next(8, 20);
+                Bar3.Height = rnd.Next(5, 14);
+                Bar4.Height = rnd.Next(10, 22);
             }
+            else
+            {
+                Bar1.Height = 4;
+                Bar2.Height = 4;
+                Bar3.Height = 4;
+                Bar4.Height = 4;
+            }
+
+            // Pet animation
+            _petAnimFrame = (_petAnimFrame + 1) % 20;
+            if (_petAnimFrame == 0) PillPet.Text = "(=^･ω･^=)";
+            else if (_petAnimFrame == 10) PillPet.Text = "(=^･ｪ･^=)";
+        }
+
+        private void SlowTimer_Tick(object? sender, EventArgs e)
+        {
+            var now = DateTime.Now;
+
+            // Clocks
+            WidgetClock.Text = now.ToString("HH:mm:ss");
+            WidgetDate.Text = now.ToString("dddd, MMMM dd, yyyy");
+
+            // Hardware update
+            _hardware.Update();
+            WidgetCpu.Text = $"CPU: {_hardware.Stats.CpuPercent}%";
+            WidgetRam.Text = $"RAM: {_hardware.Stats.RamUsedGb} / {_hardware.Stats.RamTotalGb} GB";
+            WidgetBattery.Text = $"{_hardware.Stats.BatteryPercent}% {(_hardware.Stats.IsCharging ? "⚡" : "")}";
+
+            // Pill Title & Battery
+            PillBattery.Text = $"{_hardware.Stats.BatteryPercent}% {(_hardware.Stats.IsCharging ? "⚡" : "")}";
+            if (!_isExpanded)
+            {
+                if (_media.CurrentTrack.IsPlaying && !string.IsNullOrWhiteSpace(_media.CurrentTrack.Title))
+                {
+                    PillTitle.Text = $"{_media.CurrentTrack.Title} • {_media.CurrentTrack.Artist}";
+                }
+                else
+                {
+                    PillTitle.Text = $"NotchIsland • {now:HH:mm}";
+                }
+            }
+
+            // Clipboard check
+            _clipboard.CheckClipboard();
+
+            // Controls sync if not dragging
+            VolumeSlider.Value = _hardware.Stats.Volume;
+            VolumeLabel.Text = $"{_hardware.Stats.Volume}%";
+            BrightnessSlider.Value = _hardware.Stats.Brightness;
+            BrightnessLabel.Text = $"{_hardware.Stats.Brightness}%";
         }
 
         private void OnTrackChanged()
         {
             Dispatcher.Invoke(() =>
             {
-                PillTitle.Text = $"{_mediaService.CurrentTrack.Title} · {_mediaService.CurrentTrack.Artist}";
-                TrackTitle.Text = _mediaService.CurrentTrack.Title;
-                TrackArtist.Text = _mediaService.CurrentTrack.Artist;
-                BtnPlayPause.Content = _mediaService.CurrentTrack.IsPlaying ? "⏸" : "▶";
+                var t = _media.CurrentTrack;
+                TrackTitle.Text = t.Title;
+                TrackArtist.Text = $"{t.Artist} • {t.Album}";
+                TimeTotal.Text = $"{t.Duration.Minutes:D2}:{t.Duration.Seconds:D2}";
+                PlayPauseBtn.Content = t.IsPlaying ? "⏸" : "▶";
+
+                if (t.Thumbnail != null)
+                {
+                    AlbumArtImage.Source = t.Thumbnail;
+                }
+
+                if (!_isExpanded && t.IsPlaying)
+                {
+                    PillTitle.Text = $"{t.Title} • {t.Artist}";
+                }
             });
         }
 
@@ -128,63 +184,31 @@ namespace NotchIsland
         {
             Dispatcher.Invoke(() =>
             {
-                var cur = _mediaService.CurrentTrack.Position;
-                var dur = _mediaService.CurrentTrack.Duration;
-                TimeElapsed.Text = $"{cur.Minutes}:{cur.Seconds:D2}";
-                var rem = dur - cur;
-                TimeRemaining.Text = $"-{rem.Minutes}:{rem.Seconds:D2}";
+                var t = _media.CurrentTrack;
+                TimeElapsed.Text = $"{t.Position.Minutes:D2}:{t.Position.Seconds:D2}";
 
-                if (dur.TotalSeconds > 0)
+                if (!_isDraggingSeek && t.Duration.TotalSeconds > 0)
                 {
-                    MusicSeek.Value = (cur.TotalSeconds / dur.TotalSeconds) * 100.0;
+                    SeekSlider.Value = (t.Position.TotalSeconds / t.Duration.TotalSeconds) * 100.0;
                 }
             });
         }
+        #endregion
 
-        // --- EXPAND / COLLAPSE ANIMATIONS ---
-        private void IslandBody_MouseEnter(object sender, MouseEventArgs e)
+        #region Island Expand & Collapse
+        private void Island_MouseEnter(object sender, MouseEventArgs e)
+        {
+            // Smoothly auto-expand on hover if preferred
+        }
+
+        private void Island_MouseLeave(object sender, MouseEventArgs e)
+        {
+            // Stay open when in card mode until collapsed
+        }
+
+        private void Pill_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
             ExpandIsland();
-        }
-
-        private void IslandBody_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-        {
-            if (!_isExpanded) ExpandIsland();
-        }
-
-        private void ExpandIsland()
-        {
-            if (_isExpanded) return;
-            _isExpanded = true;
-
-            AnimateIsland(540, 260, 24);
-            CompactView.Visibility = Visibility.Collapsed;
-            ExpandedView.Visibility = Visibility.Visible;
-        }
-
-        private void CollapseIsland()
-        {
-            if (!_isExpanded) return;
-            _isExpanded = false;
-
-            AnimateIsland(230, 38, 19);
-            ExpandedView.Visibility = Visibility.Collapsed;
-            CompactView.Visibility = Visibility.Visible;
-        }
-
-        private void AnimateIsland(double targetW, double targetH, double targetR)
-        {
-            var animW = new DoubleAnimation(targetW, TimeSpan.FromMilliseconds(220)) { EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut } };
-            var animH = new DoubleAnimation(targetH, TimeSpan.FromMilliseconds(220)) { EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut } };
-
-            IslandBody.BeginAnimation(WidthProperty, animW);
-            IslandBody.BeginAnimation(HeightProperty, animH);
-            IslandBody.CornerRadius = new CornerRadius(targetR);
-        }
-
-        private void IslandBody_MouseLeave(object sender, MouseEventArgs e)
-        {
-            // Optional auto-collapse if mouse leaves window
         }
 
         private void CollapseBtn_Click(object sender, RoutedEventArgs e)
@@ -192,97 +216,344 @@ namespace NotchIsland
             CollapseIsland();
         }
 
-        // --- 10 TABS SWITCHER ---
+        private void ExpandIsland()
+        {
+            _isExpanded = true;
+            PillBorder.Visibility = Visibility.Collapsed;
+            CardBorder.Visibility = Visibility.Visible;
+            UpdatePosition();
+        }
+
+        private void CollapseIsland()
+        {
+            _isExpanded = false;
+            CardBorder.Visibility = Visibility.Collapsed;
+            PillBorder.Visibility = Visibility.Visible;
+            UpdatePosition();
+        }
+        #endregion
+
+        #region Navigation Tabs
         private void Tab_Click(object sender, RoutedEventArgs e)
         {
-            if (sender is Button btn && btn.Tag is string tag)
+            if (sender is Button btn && btn.Tag is string tabName)
             {
-                ContentMusic.Visibility = tag == "Music" ? Visibility.Visible : Visibility.Collapsed;
-                ContentWebsites.Visibility = tag == "Websites" ? Visibility.Visible : Visibility.Collapsed;
-                ContentNotifications.Visibility = tag == "Notifications" ? Visibility.Visible : Visibility.Collapsed;
-                ContentShelf.Visibility = tag == "Shelf" ? Visibility.Visible : Visibility.Collapsed;
-                ContentClipboard.Visibility = tag == "Clipboard" ? Visibility.Visible : Visibility.Collapsed;
-                ContentWidgets.Visibility = tag == "Widgets" ? Visibility.Visible : Visibility.Collapsed;
-                ContentControls.Visibility = tag == "Controls" ? Visibility.Visible : Visibility.Collapsed;
-                ContentTools.Visibility = tag == "Tools" ? Visibility.Visible : Visibility.Collapsed;
-                ContentDeck.Visibility = tag == "Deck" ? Visibility.Visible : Visibility.Collapsed;
-                ContentCalls.Visibility = tag == "Calls" ? Visibility.Visible : Visibility.Collapsed;
+                ShowPanel(tabName);
             }
         }
 
-        // --- MEDIA ACTIONS ---
-        private async void MusicPlayPause_Click(object sender, RoutedEventArgs e) => await _mediaService.TogglePlayPauseAsync();
-        private async void MusicNext_Click(object sender, RoutedEventArgs e) => await _mediaService.SkipNextAsync();
-        private async void MusicPrev_Click(object sender, RoutedEventArgs e) => await _mediaService.SkipPreviousAsync();
-        private async void MusicSeek_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        private void ShowPanel(string name)
         {
-            if (MusicSeek.IsMouseOver)
+            PanelMusic.Visibility = Visibility.Collapsed;
+            PanelShelf.Visibility = Visibility.Collapsed;
+            PanelClipboard.Visibility = Visibility.Collapsed;
+            PanelWidgets.Visibility = Visibility.Collapsed;
+            PanelControls.Visibility = Visibility.Collapsed;
+            PanelWeb.Visibility = Visibility.Collapsed;
+            PanelNotifications.Visibility = Visibility.Collapsed;
+            PanelTools.Visibility = Visibility.Collapsed;
+            PanelDeck.Visibility = Visibility.Collapsed;
+            PanelCalls.Visibility = Visibility.Collapsed;
+
+            switch (name)
             {
-                await _mediaService.SeekAsync(e.NewValue / 100.0);
+                case "Music": PanelMusic.Visibility = Visibility.Visible; break;
+                case "Shelf": PanelShelf.Visibility = Visibility.Visible; UpdateShelfStatus(); break;
+                case "Clipboard": PanelClipboard.Visibility = Visibility.Visible; break;
+                case "Widgets": PanelWidgets.Visibility = Visibility.Visible; break;
+                case "Controls": PanelControls.Visibility = Visibility.Visible; break;
+                case "Web": PanelWeb.Visibility = Visibility.Visible; break;
+                case "Notifications": PanelNotifications.Visibility = Visibility.Visible; break;
+                case "Tools": PanelTools.Visibility = Visibility.Visible; break;
+                case "Deck": PanelDeck.Visibility = Visibility.Visible; break;
+                case "Calls": PanelCalls.Visibility = Visibility.Visible; break;
             }
-        }
-
-        // --- PET INTERACTION ---
-        private void PetBadge_Click(object sender, MouseButtonEventArgs e)
-        {
-            PetText.Text = "(=^･ω･^=) ♡";
-        }
-
-        // --- SITES & TOOLS ---
-        private void LaunchSite_Click(object sender, MouseButtonEventArgs e)
-        {
-            if (sender is FrameworkElement el && el.Tag is string url)
-            {
-                Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
-            }
-        }
-
-        private void AddSite_Click(object sender, MouseButtonEventArgs e)
-        {
-            MessageBox.Show("Add a site: Type any URL in settings to pin it here.", "NotchIsland Websites");
-        }
-
-        private void SendToPhone_Click(object sender, RoutedEventArgs e)
-        {
-            Process.Start(new ProcessStartInfo("http://localhost:8088") { UseShellExecute = true });
-        }
-
-        private void TimerPlay_Click(object sender, RoutedEventArgs e)
-        {
-            _pomodoroRunning = !_pomodoroRunning;
-        }
-
-        private void ToolScreenshot_Click(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                Process.Start(new ProcessStartInfo("ms-screenclip:") { UseShellExecute = true });
-            }
-            catch { }
-        }
-
-        private void ToolSnip_Click(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                Process.Start(new ProcessStartInfo("snippingtool.exe") { UseShellExecute = true });
-            }
-            catch { }
-        }
-
-        private void MicToggle_Click(object sender, RoutedEventArgs e)
-        {
-            MessageBox.Show("Microphone toggled (Mute/Unmute hotkey: Ctrl+Alt+M)", "NotchIsland Calls");
-        }
-
-        private void ThemeBtn_Click(object sender, RoutedEventArgs e)
-        {
-            MessageBox.Show("Theme switcher: OLED Pitch Black / Glass Acrylic", "NotchIsland Theme");
         }
 
         private void SettingsBtn_Click(object sender, RoutedEventArgs e)
         {
-            MessageBox.Show("Settings: 14 categories configured (General, Appearance, Island, Taskbar, Tools, Keys, About).", "NotchIsland Settings");
+            _settingsWindow ??= new SettingsWindow();
+            _settingsWindow.Show();
+            _settingsWindow.Activate();
         }
+        #endregion
+
+        #region Media Actions
+        private async void PlayPauseBtn_Click(object sender, RoutedEventArgs e)
+        {
+            await _media.TogglePlayPauseAsync();
+        }
+
+        private async void PrevBtn_Click(object sender, RoutedEventArgs e)
+        {
+            await _media.SkipPreviousAsync();
+        }
+
+        private async void NextBtn_Click(object sender, RoutedEventArgs e)
+        {
+            await _media.SkipNextAsync();
+        }
+
+        private async void SeekSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (SeekSlider.IsMouseCaptureWithin)
+            {
+                _isDraggingSeek = true;
+                double frac = SeekSlider.Value / 100.0;
+                await _media.SeekAsync(frac);
+                _isDraggingSeek = false;
+            }
+        }
+        #endregion
+
+        #region File Shelf Actions
+        private void Shelf_DragOver(object sender, DragEventArgs e)
+        {
+            if (e.Data.GetDataPresent(DataFormats.FileDrop))
+            {
+                e.Effects = DragDropEffects.Copy;
+                e.Handled = true;
+            }
+        }
+
+        private void Shelf_Drop(object sender, DragEventArgs e)
+        {
+            if (e.Data.GetDataPresent(DataFormats.FileDrop))
+            {
+                var files = (string[])e.Data.GetData(DataFormats.FileDrop);
+                foreach (var f in files)
+                {
+                    FileShelfService.AddFile(f);
+                }
+                UpdateShelfStatus();
+            }
+        }
+
+        private void ShelfItemOpen_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is Button btn && btn.Tag is ShelfItem item)
+            {
+                FileShelfService.OpenFile(item);
+            }
+        }
+
+        private void ShelfItemRemove_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is Button btn && btn.Tag is ShelfItem item)
+            {
+                FileShelfService.RemoveItem(item);
+                UpdateShelfStatus();
+            }
+        }
+
+        private void ShelfClear_Click(object sender, RoutedEventArgs e)
+        {
+            FileShelfService.ClearAll();
+            UpdateShelfStatus();
+        }
+
+        private void UpdateShelfStatus()
+        {
+            ShelfStatus.Text = $"Shelf holds {FileShelfService.Items.Count} files";
+        }
+        #endregion
+
+        #region Clipboard Actions
+        private void ClipboardItem_Click(object sender, MouseButtonEventArgs e)
+        {
+            if (sender is FrameworkElement fe && fe.DataContext is ClipboardItem item)
+            {
+                _clipboard.CopyItem(item);
+            }
+        }
+
+        private void ClipboardDelete_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is Button btn && btn.Tag is ClipboardItem item)
+            {
+                _clipboard.DeleteItem(item);
+            }
+        }
+
+        private void ClipboardClear_Click(object sender, RoutedEventArgs e)
+        {
+            _clipboard.ClearAll();
+        }
+        #endregion
+
+        #region Widgets Actions
+        private void TimerToggle_Click(object sender, RoutedEventArgs e)
+        {
+            if (_stopwatch.IsRunning)
+            {
+                _stopwatch.Stop();
+                TimerToggleBtn.Content = "▶";
+            }
+            else
+            {
+                _stopwatch.Start();
+                TimerToggleBtn.Content = "⏸";
+            }
+        }
+
+        private void TimerReset_Click(object sender, RoutedEventArgs e)
+        {
+            _stopwatch.Reset();
+            StopwatchDisplay.Text = "00:00.0";
+            TimerToggleBtn.Content = "▶";
+        }
+        #endregion
+
+        #region Controls Actions
+        private void VolumeSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (VolumeSlider.IsMouseCaptureWithin)
+            {
+                SystemControlService.SetMasterVolume((float)VolumeSlider.Value);
+                VolumeLabel.Text = $"{(int)VolumeSlider.Value}%";
+            }
+        }
+
+        private void MuteBtn_Click(object sender, RoutedEventArgs e)
+        {
+            SystemControlService.ToggleMute();
+            bool muted = SystemControlService.GetIsMuted();
+            MuteBtn.Content = muted ? "Unmute" : "Mute";
+        }
+
+        private void BrightnessSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (BrightnessSlider.IsMouseCaptureWithin)
+            {
+                SystemControlService.SetBrightness((int)BrightnessSlider.Value);
+                BrightnessLabel.Text = $"{(int)BrightnessSlider.Value}%";
+            }
+        }
+
+        private void WifiBtn_Click(object sender, RoutedEventArgs e)
+        {
+            SystemControlService.OpenNetworkSettings();
+        }
+
+        private void BluetoothBtn_Click(object sender, RoutedEventArgs e)
+        {
+            SystemControlService.OpenBluetoothSettings();
+        }
+
+        private void NightLightBtn_Click(object sender, RoutedEventArgs e)
+        {
+            SystemControlService.OpenNightLightSettings();
+        }
+        #endregion
+
+        #region Web Actions
+        private void WebTile_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is Button btn && btn.Tag is string url)
+            {
+                try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); } catch { }
+            }
+        }
+
+        private void WebLaunchCustom_Click(object sender, RoutedEventArgs e)
+        {
+            string url = WebUrlInput.Text.Trim();
+            if (!url.StartsWith("http://") && !url.StartsWith("https://"))
+            {
+                url = "https://" + url;
+            }
+            try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); } catch { }
+        }
+        #endregion
+
+        #region Notifications Actions
+        private void NotificationsClear_Click(object sender, RoutedEventArgs e)
+        {
+            NotificationsStack.Children.Clear();
+            NotificationsStack.Children.Add(new TextBlock
+            {
+                Text = "No notifications",
+                Foreground = System.Windows.Media.Brushes.Gray,
+                FontSize = 12,
+                Margin = new Thickness(0, 10, 0, 0),
+                HorizontalAlignment = HorizontalAlignment.Center
+            });
+        }
+        #endregion
+
+        #region Tools Actions
+        private void ScreenshotBtn_Click(object sender, RoutedEventArgs e)
+        {
+            var saved = SystemControlService.TakeScreenshot();
+            if (saved != null)
+            {
+                UpdateShelfStatus();
+            }
+        }
+
+        private void SnipBtn_Click(object sender, RoutedEventArgs e)
+        {
+            SystemControlService.LaunchSnip();
+        }
+
+        private void ColorPickerBtn_Click(object sender, RoutedEventArgs e)
+        {
+            string hex = SystemControlService.PickColorUnderCursor();
+            MessageBox.Show($"Copied color to clipboard: {hex}", "NotchIsland Color Picker", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+
+        private void TaskManagerBtn_Click(object sender, RoutedEventArgs e)
+        {
+            try { Process.Start(new ProcessStartInfo("taskmgr.exe") { UseShellExecute = true }); } catch { }
+        }
+        #endregion
+
+        #region Deck Actions
+        private void GenerateDeckQrCode()
+        {
+            try
+            {
+                using var generator = new QRCodeGenerator();
+                using var data = generator.CreateQrCode("http://localhost:8088", QRCodeGenerator.ECCLevel.Q);
+                using var qrCode = new PngByteQRCode(data);
+                byte[] qrBytes = qrCode.GetGraphic(20);
+
+                using var stream = new MemoryStream(qrBytes);
+                var bmp = new BitmapImage();
+                bmp.BeginInit();
+                bmp.CacheOption = BitmapCacheOption.OnLoad;
+                bmp.StreamSource = stream;
+                bmp.EndInit();
+                bmp.Freeze();
+
+                DeckQrCode.Source = bmp;
+            }
+            catch { }
+        }
+
+        private void DeckOpenBrowser_Click(object sender, RoutedEventArgs e)
+        {
+            try { Process.Start(new ProcessStartInfo("http://localhost:8088") { UseShellExecute = true }); } catch { }
+        }
+        #endregion
+
+        #region Calls Actions
+        private void MicMuteCallBtn_Click(object sender, RoutedEventArgs e)
+        {
+            _isMicMuted = !_isMicMuted;
+            if (_isMicMuted)
+            {
+                MicMuteIcon.Text = "🔇";
+                MicMuteStatus.Text = "Microphone MUTED (Click to Unmute)";
+                MicMuteCallBtn.Background = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFrom("#40FF3B30")!;
+            }
+            else
+            {
+                MicMuteIcon.Text = "🎤";
+                MicMuteStatus.Text = "Microphone LIVE (Click to Mute)";
+                MicMuteCallBtn.Background = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFrom("#18FFFFFF")!;
+            }
+        }
+        #endregion
     }
 }

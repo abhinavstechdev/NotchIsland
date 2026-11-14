@@ -37,7 +37,7 @@ namespace NotchIsland.Native
         [DllImport("user32.dll")]
         public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
 
-        public static void MakeWindowGlass(IntPtr hWnd)
+        public static void MakeTransparent(IntPtr hWnd)
         {
             try
             {
@@ -46,6 +46,8 @@ namespace NotchIsland.Native
             }
             catch { }
         }
+
+        public static void MakeWindowGlass(IntPtr hWnd) => MakeTransparent(hWnd);
 
         public static void ApplyNoActivateAndTopmost(IntPtr hWnd)
         {

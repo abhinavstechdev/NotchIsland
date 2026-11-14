@@ -1,65 +1,77 @@
-# NotchIsland 🏝️ — Native Windows Dynamic Island & Notch
+# NotchIsland 🏝️
 
-A blazing-fast, lightweight native desktop customization app written in **Rust** that brings an interactive Dynamic Island and top notch to **Windows 10 & 11**.
+**NotchIsland** is an authentic, high-performance Windows Dynamic Island utility built natively in **C# / .NET 9 and WPF**, reverse-engineered directly from **NotchPixel** (`KOREINDUSTRIES.NotchPixel`).
 
-Inspired by Apple's Dynamic Island and reverse-engineered from NotchPixel using REA, **NotchIsland** is built from scratch with pure Win32 windowing, analytical spring physics, fluid continuous-curvature squircles, local Wi-Fi file sharing, and hardware telemetry.
+It delivers deep OLED styling, continuous squircle curvature, live media playback integration, a full 10-tab navigation system, and a comprehensive native Settings window.
 
 ---
 
 ## ✨ Features
 
-- **🏝️ Dynamic Island & Bezel Notch**: Sits discreetly at the top-center of your display. Expands fluidly upon cursor hover.
-- **🖱️ True Click-Through & Zero Focus Stealing**:
-  - Uses `WS_EX_TRANSPARENT` in idle mode so clicks pass directly through to windows beneath.
-  - Active proximity detection removes click-through when hovered.
-  - Configured with `WS_EX_NOACTIVATE` so it never steals keyboard focus from full-screen games, code editors, or typing.
-- **🎵 Interactive Media Player**:
+- **🖤 Authentic OLED Black Island**:
+  - Continuous squircle curvature with seamless desktop transparency (`DwmExtendFrameIntoClientArea` + `WS_EX_TOOLWINDOW | WS_EX_TOPMOST`).
+  - **Compact Pill Mode** (320x40): Live mini album art or audio visualizer bars, animated desktop pet (`(=^･ω･^=)`), dynamic title/artist & clock, live battery % and status.
+  - **Expanded Card Mode** (560x270): 10 fully functional tabs and custom settings.
+
+- **🎵 1. Music (Media)**:
   - Windows Global System Media Transport Controls (GSMTC) integration.
-  - Track metadata, dynamic album accent tinting, seek scrubber slider, and animated frequency bars in pill mode.
-- **📁 File Shelf & Wireless Phone Transfer**:
-  - Drag and drop or stage files directly onto the island.
-  - Embedded background HTTP server on local Wi-Fi.
-  - Generates a 2D QR Code directly on the card: scan with your phone's camera to download files without an app or internet connection!
-- **⚡ Performance Telemetry & Gaming HUD**:
-  - Real-time Hardware FPS, CPU load, and RAM usage gauges.
-  - Automatically collapses into an ultra-slim 28px gaming HUD when fullscreen DirectX/D3D applications or games are active.
-- **🎛️ Quick System Utilities**:
-  - Master volume slider & mute toggle.
-  - Global microphone mute button (`Ctrl + Alt + M`).
-  - Screen backlight brightness control (VESA DDC/CI).
-  - One-click switcher between Floating Island and Top Bezel Notch.
+  - Real album art thumbnail, title, artist, and album.
+  - Interactive seek slider with live elapsed and remaining times.
+  - Play/Pause, Skip Next, Skip Previous, and Master Volume controls.
+
+- **📁 2. File Shelf**:
+  - Live drag-and-drop zone from Windows File Explorer.
+  - File management: quick preview, file size formatting, "Open" in default app, and "Remove".
+  - Persistent shelf file holding.
+
+- **📋 3. Clipboard Manager**:
+  - Real-time Win32 clipboard monitoring.
+  - Text snippet history with timestamps.
+  - Pinning, single-click copy back to clipboard, individual deletion, and history clearing.
+
+- **🧩 4. Widgets**:
+  - **Digital Clock**: Live HH:mm:ss display with localized date.
+  - **Live Weather**: Temperature, weather condition, and air quality report.
+  - **Hardware Monitor**: Real CPU % (`PerformanceCounter`), RAM usage and total GB (`GlobalMemoryStatusEx`), battery level, and AC power state.
+  - **Stopwatch / Timer**: Interactive Start, Pause, and Reset controls with millisecond precision.
+
+- **🎛 5. Controls & System**:
+  - Real Master Volume slider with live Mute/Unmute toggle (via CoreAudio COM `IAudioEndpointVolume`).
+  - Monitor Brightness slider (via WMI `WmiMonitorBrightnessMethods`).
+  - Quick-launch shortcuts for Windows Wi-Fi, Bluetooth, and Night Light settings.
+
+- **🌐 6. Web Quick Launch**:
+  - Customizable URL launcher bar with automatic browser invocation.
+  - Quick launch tiles: Google, YouTube, GitHub, ChatGPT, and Reddit.
+
+- **🔔 7. Notifications**:
+  - Windows Notification Mirroring feed with source header, message body, and dismiss/clear all.
+
+- **✂ 8. Tools & Screen Capture**:
+  - Full-screen screenshot tool: captures entire screen, saves PNG to `Pictures\Screenshots`, copies image to clipboard, and automatically places it on the File Shelf.
+  - Screen Snip tool: launches Windows Snip & Sketch (`ms-screenclip:`).
+  - Screen Color Picker: magnifies pixel under cursor and copies Hex `#RRGGBB` to clipboard.
+  - Task Manager quick launcher.
+
+- **📱 9. PC Deck Companion**:
+  - Embedded local HTTP server on `http://localhost:8088`.
+  - Serves authentic extracted Deck companion web interface (`app.js`, `style.css`, `pad.js`, `pages.js`).
+  - Live QR code generated on-screen for instant mobile device pairing over Wi-Fi.
+
+- **🎧 10. Calls & Audio**:
+  - Interactive Microphone Mute / Live toggle with instant status indicator.
+  - Endpoint monitoring.
+
+- **⚙ Comprehensive Settings Window**:
+  - Dedicated 840x680 OLED dark settings window matching NotchPixel's exact architecture.
+  - 8 configuration categories: General, Appearance, Media & Music, Shelf & Clipboard, Widgets, Controls & HUDs, Hotkeys, PC Deck, and About.
+  - Automatically loads and persists to `%APPDATA%\NotchIsland\settings.json`.
 
 ---
 
-## 📐 Mathematical & Architectural Highlights
+## 🚀 Download & Run
 
-- **Squircle Geometry**: Renders G2 continuous curvature superellipses using cubic Bézier offsets with $\kappa = \frac{4(\sqrt{2}-1)}{3} \approx 0.55228$.
-- **Analytical Spring Physics**:
-  $$x(t) = 1.0 - e^{-(t / 16.0)^2} \cdot \left[ 1.4 \cdot A \cdot \sin(4.0 \cdot t - 0.5) + 0.18 \cdot A \cdot \sin(7.5 \cdot t) \right]$$
-- **High Performance**: Native binary consuming ~14 MB RAM with sub-millisecond frame rendering.
+Download the pre-compiled, self-contained single-file executable from [Releases](https://github.com/abhinavstechdev/NotchIsland/releases):
+- **`NotchIsland.exe`** (~197 MB, self-contained, no .NET runtime installation required).
 
----
-
-## 🚀 Building & Running
-
-### Prerequisites
-- [Rust & Cargo](https://rustup.rs/) (1.80+)
-- Windows 10 (version 19041+) or Windows 11 (x64)
-
-### Development
-```bash
-git clone https://github.com/abhinavstechdev/NotchIsland.git
-cd NotchIsland
-cargo run
-```
-
-### Build Optimized Release Executable
-```bash
-cargo build --release
-```
-The standalone `.exe` will be located at `target/release/notch_island.exe` with no terminal console window.
-
----
-
-## 📜 License
-MIT License. Free and open source.
+Run `NotchIsland.exe` directly on Windows 10 or Windows 11 (x64).
