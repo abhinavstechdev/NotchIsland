@@ -32,24 +32,131 @@
         <Style x:Key="TabNavButtonStyle" TargetType="Button">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Foreground" Value="{StaticResource TextSecondary}" />
-            <Setter Property="FontSize" Value="13.5" />
-            <Setter Property="Width" Value="34" />
-            <Setter Property="Height" Value="30" />
+            <Setter Property="Foreground" Value="#77EFEDE8" />
+            <Setter Property="FontSize" Value="12.5" />
+            <Setter Property="Width" Value="26" />
+            <Setter Property="Height" Value="26" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border x:Name="border" Background="{TemplateBinding Background}" CornerRadius="7" Margin="1,0">
+                        <Border x:Name="border" Background="{TemplateBinding Background}" CornerRadius="6" Margin="0,0">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="border" Property="Background" Value="{StaticResource GlassHover}" />
-                                <Setter Property="Foreground" Value="{StaticResource AccentCyan}" />
+                                <Setter TargetName="border" Property="Background" Value="#1FFFFFFF" />
+                                <Setter Property="Foreground" Value="#FFFFFF" />
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
                                 <Setter TargetName="border" Property="Background" Value="#33FFFFFF" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Sleek Audio Scrubber Slider Style -->
+        <Style x:Key="SleekSliderStyle" TargetType="Slider">
+            <Setter Property="Stylus.IsPressAndHoldEnabled" Value="false" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Height" Value="14" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <Grid VerticalAlignment="Center">
+                            <Track x:Name="PART_Track">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="Slider.DecreaseLarge">
+                                        <RepeatButton.Template>
+                                            <ControlTemplate>
+                                                <Border Height="3" Background="#EFEDE8" CornerRadius="1.5" />
+                                            </ControlTemplate>
+                                        </RepeatButton.Template>
+                                    </RepeatButton>
+                                </Track.DecreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb>
+                                        <Thumb.Template>
+                                            <ControlTemplate>
+                                                <Ellipse Width="10" Height="10" Fill="#EFEDE8">
+                                                    <Ellipse.Effect>
+                                                        <DropShadowEffect BlurRadius="4" ShadowDepth="1" Opacity="0.5" Color="#000000" />
+                                                    </Ellipse.Effect>
+                                                </Ellipse>
+                                            </ControlTemplate>
+                                        </Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="Slider.IncreaseLarge">
+                                        <RepeatButton.Template>
+                                            <ControlTemplate>
+                                                <Border Height="3" Background="#26FFFFFF" CornerRadius="1.5" />
+                                            </ControlTemplate>
+                                        </RepeatButton.Template>
+                                    </RepeatButton>
+                                </Track.IncreaseRepeatButton>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Play/Pause Hero Button Style: Circular White Button with High Contrast -->
+        <Style x:Key="PlayPauseBtnStyle" TargetType="Button">
+            <Setter Property="Width" Value="38" />
+            <Setter Property="Height" Value="38" />
+            <Setter Property="Background" Value="#EFEDE8" />
+            <Setter Property="Foreground" Value="#0B0B0C" />
+            <Setter Property="FontSize" Value="15" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="btnBorder" Background="{TemplateBinding Background}" CornerRadius="19">
+                            <Border.Effect>
+                                <DropShadowEffect BlurRadius="8" ShadowDepth="2" Opacity="0.3" Color="#000000" />
+                            </Border.Effect>
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" Margin="1,0,0,0" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="btnBorder" Property="Background" Value="#FFFFFF" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="btnBorder" Property="Background" Value="#D0D0D4" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Previous/Next Transport Icon Button Style -->
+        <Style x:Key="TransportIconBtnStyle" TargetType="Button">
+            <Setter Property="Width" Value="30" />
+            <Setter Property="Height" Value="30" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="#EFEDE8" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="iconBorder" Background="{TemplateBinding Background}" CornerRadius="15">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="iconBorder" Property="Background" Value="#1FFFFFFF" />
+                                <Setter Property="Foreground" Value="#FFFFFF" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="iconBorder" Property="Background" Value="#33FFFFFF" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -125,7 +232,7 @@
                 BorderBrush="{StaticResource HairlineBorder}"
                 BorderThickness="1"
                 CornerRadius="19"
-                Margin="0,6,0,0"
+                Margin="0,0,0,0"
                 ClipToBounds="True"
                 Cursor="Hand"
                 MouseEnter="Island_MouseEnter"
@@ -218,43 +325,54 @@
                     </Border>
 
                     <!-- Main Dynamic Panels Area -->
-                    <Grid Grid.Row="1" Margin="14,10">
+                    <Grid Grid.Row="1" Margin="14,4,14,6">
 
-                        <!-- 1. MUSIC / MEDIA PANEL -->
+                        <!-- 1. MUSIC / MEDIA PANEL (Exact NotchPixel XE.cs:10100-10330 Layout) -->
                         <Grid x:Name="PanelMusic" Visibility="Visible">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="105" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <!-- Row 0: Top half - Album Art, Track Info, Transport Controls -->
+                                <RowDefinition Height="Auto" />
+                                <!-- Row 1: Bottom half - Sleek Progress Scrubber & Timers -->
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
 
-                            <!-- Album Art with Soft Glow -->
-                            <Border Grid.Column="0" Width="96" Height="96" CornerRadius="10" Background="{StaticResource SurfaceDark}" BorderBrush="{StaticResource HairlineBorder}" BorderThickness="1">
-                                <Image x:Name="AlbumArtImage" Stretch="UniformToFill" />
-                            </Border>
+                            <!-- Top Section -->
+                            <Grid Grid.Row="0" Margin="2,2,2,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="62" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
 
-                            <!-- Track Info & Controls -->
-                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="12,0,0,0">
-                                <TextBlock x:Name="TrackTitle" Text="Starboy" Foreground="{StaticResource TextPrimary}" FontSize="15" FontWeight="Bold" TextTrimming="CharacterEllipsis" />
-                                <TextBlock x:Name="TrackArtist" Text="The Weeknd • Starboy" Foreground="{StaticResource TextSecondary}" FontSize="12" Margin="0,2,0,8" TextTrimming="CharacterEllipsis" />
+                                <!-- Album Art with Squircle Corner Radius & Inner Border -->
+                                <Border Grid.Column="0" Width="58" Height="58" CornerRadius="12" Background="#161618" BorderBrush="#33FFFFFF" BorderThickness="1">
+                                    <Border.Clip>
+                                        <RectangleGeometry Rect="0,0,58,58" RadiusX="12" RadiusY="12" />
+                                    </Border.Clip>
+                                    <Image x:Name="AlbumArtImage" Stretch="UniformToFill" />
+                                </Border>
 
-                                <!-- Live Interactive Seek Bar with Elapsed & Remaining Time -->
-                                <Grid Margin="0,0,0,8">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="36" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="40" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock x:Name="TimeElapsed" Grid.Column="0" Text="01:06" Foreground="{StaticResource TextSecondary}" FontSize="10.5" VerticalAlignment="Center" />
-                                    <Slider x:Name="SeekSlider" Grid.Column="1" Minimum="0" Maximum="100" Value="35" Margin="5,0" Cursor="Hand" ValueChanged="SeekSlider_ValueChanged" />
-                                    <TextBlock x:Name="TimeTotal" Grid.Column="2" Text="-06:36" Foreground="{StaticResource TextSecondary}" FontSize="10.5" HorizontalAlignment="Right" VerticalAlignment="Center" />
-                                </Grid>
-
-                                <!-- Playback Buttons -->
-                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                                    <Button Style="{StaticResource ActionBtnStyle}" Content="⏮" Width="36" Height="30" Click="PrevBtn_Click" Margin="5,0" />
-                                    <Button x:Name="PlayPauseBtn" Style="{StaticResource ActionBtnStyle}" Content="⏸" Width="42" Height="32" FontSize="14" Background="{StaticResource AccentCyan}" Foreground="#000000" Click="PlayPauseBtn_Click" Margin="5,0" />
-                                    <Button Style="{StaticResource ActionBtnStyle}" Content="⏭" Width="36" Height="30" Click="NextBtn_Click" Margin="5,0" />
+                                <!-- Track Title & Artist -->
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="12,0,8,0">
+                                    <TextBlock x:Name="TrackTitle" Text="Starboy" Foreground="{StaticResource TextPrimary}" FontSize="14.5" FontWeight="Bold" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock x:Name="TrackArtist" Text="The Weeknd • Starboy" Foreground="{StaticResource TextSecondary}" FontSize="11.5" Margin="0,3,0,0" TextTrimming="CharacterEllipsis" />
                                 </StackPanel>
+
+                                <!-- Right-Aligned Transport Controls -->
+                                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,2,0">
+                                    <Button Style="{StaticResource TransportIconBtnStyle}" Content="⏮" Click="PrevBtn_Click" Margin="0,0,4,0" ToolTip="Previous" />
+                                    <Button x:Name="PlayPauseBtn" Style="{StaticResource PlayPauseBtnStyle}" Content="⏸" Click="PlayPauseBtn_Click" Margin="0,0,4,0" ToolTip="Play / Pause" />
+                                    <Button Style="{StaticResource TransportIconBtnStyle}" Content="⏭" Click="NextBtn_Click" ToolTip="Next" />
+                                </StackPanel>
+                            </Grid>
+
+                            <!-- Bottom Section: Sleek Wave Scrubber & Timers -->
+                            <StackPanel Grid.Row="1" Margin="2,8,2,0">
+                                <Slider x:Name="SeekSlider" Style="{StaticResource SleekSliderStyle}" Minimum="0" Maximum="100" Value="35" Cursor="Hand" ValueChanged="SeekSlider_ValueChanged" />
+                                <Grid Margin="1,2,1,0">
+                                    <TextBlock x:Name="TimeElapsed" Text="01:06" Foreground="{StaticResource TextSecondary}" FontSize="10" HorizontalAlignment="Left" />
+                                    <TextBlock x:Name="TimeTotal" Text="-18:22" Foreground="{StaticResource TextSecondary}" FontSize="10" HorizontalAlignment="Right" />
+                                </Grid>
                             </StackPanel>
                         </Grid>
 

@@ -75,7 +75,7 @@ namespace NotchIsland
         {
             double screenWidth = SystemParameters.PrimaryScreenWidth;
             Left = (screenWidth - Width) / 2.0;
-            Top = SettingsService.Current.TopGap;
+            Top = 0; // Pinned directly to the top display bezel
         }
 
         private async void Window_Loaded(object sender, RoutedEventArgs e)
@@ -280,16 +280,36 @@ namespace NotchIsland
             CollapseIsland();
         }
 
+        private (double Width, double Height) GetPanelDimensions(string name) => name switch
+        {
+            "Music" or "Media" => (400.0, 166.0),
+            "Web" => (440.0, 210.0),
+            "Notifications" => (400.0, 180.0),
+            "Chat" => (420.0, 180.0),
+            "Agents" => (420.0, 180.0),
+            "Shelf" => (420.0, 196.0),
+            "Clipboard" => (400.0, 216.0),
+            "Widgets" => (420.0, 210.0),
+            "Controls" => (400.0, 176.0),
+            "Tools" => (420.0, 190.0),
+            "Deck" => (400.0, 220.0),
+            "Tiles" => (400.0, 180.0),
+            "Calls" => (400.0, 196.0),
+            _ => (400.0, 166.0)
+        };
+
         public void ExpandIsland()
         {
             if (_isExpanded) return;
             _isExpanded = true;
 
+            var dims = GetPanelDimensions(_currentActivePanelName);
+
             _widthSpring.Params = SpringParams.CardMorph;
-            _widthSpring.SetTarget(540.0);
+            _widthSpring.SetTarget(dims.Width);
 
             _heightSpring.Params = SpringParams.CardMorph;
-            _heightSpring.SetTarget(270.0);
+            _heightSpring.SetTarget(dims.Height);
 
             _radiusSpring.Params = SpringParams.Snappy;
             _radiusSpring.SetTarget(24.0);
@@ -371,6 +391,15 @@ namespace NotchIsland
             target.Visibility = Visibility.Visible;
 
             if (name == "Shelf") UpdateShelfStatus();
+
+            if (_isExpanded)
+            {
+                var dims = GetPanelDimensions(name);
+                _widthSpring.Params = SpringParams.BS;
+                _widthSpring.SetTarget(dims.Width);
+                _heightSpring.Params = SpringParams.BS;
+                _heightSpring.SetTarget(dims.Height);
+            }
 
             // Trigger Spring Slide & Fade
             _tabSlideSpring.SnapTo(slideDir);
