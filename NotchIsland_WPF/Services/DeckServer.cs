@@ -22,7 +22,6 @@ namespace NotchIsland.Services
             {
                 _listener = new HttpListener();
                 _listener.Prefixes.Add($"http://localhost:{Port}/");
-                _listener.Prefixes.Add($"http://127.0.0.1:{Port}/");
                 _listener.Start();
                 IsRunning = true;
                 _cts = new CancellationTokenSource();
@@ -31,7 +30,20 @@ namespace NotchIsland.Services
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"DeckServer start error: {ex.Message}");
+                try
+                {
+                    _listener = new HttpListener();
+                    _listener.Prefixes.Add($"http://127.0.0.1:{Port}/");
+                    _listener.Start();
+                    IsRunning = true;
+                    _cts = new CancellationTokenSource();
+
+                    Task.Run(() => ListenLoop(_cts.Token));
+                }
+                catch
+                {
+                    System.Diagnostics.Debug.WriteLine($"DeckServer start error: {ex.Message}");
+                }
             }
         }
 

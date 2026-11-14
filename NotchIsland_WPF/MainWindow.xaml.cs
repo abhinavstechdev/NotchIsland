@@ -6,7 +6,6 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
-using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using NotchIsland.Native;
@@ -23,7 +22,16 @@ namespace NotchIsland
         private readonly DeckServer _deckServer = new();
         private SettingsWindow? _settingsWindow;
 
-        private DispatcherTimer? _fastTimer;
+        // 2nd-Order Analytical Spring Physics Engines
+        private readonly AnalyticalSpring _widthSpring = new(212.0, SpringParams.CardMorph);
+        private readonly AnalyticalSpring _heightSpring = new(38.0, SpringParams.CardMorph);
+        private readonly AnalyticalSpring _radiusSpring = new(19.0, SpringParams.Snappy);
+        private readonly AnalyticalSpring _pillAlphaSpring = new(1.0, SpringParams.Snappy);
+        private readonly AnalyticalSpring _cardAlphaSpring = new(0.0, SpringParams.Snappy);
+        private readonly AnalyticalSpring _tabSlideSpring = new(0.0, SpringParams.TabSlide);
+        private readonly AnalyticalSpring _tabFadeSpring = new(1.0, SpringParams.TabFade);
+
+        private DispatcherTimer? _renderLoop;
         private DispatcherTimer? _slowTimer;
         private Stopwatch _stopwatch = new();
 
@@ -32,22 +40,35 @@ namespace NotchIsland
         private bool _isDraggingSeek = false;
         private int _petAnimFrame = 0;
         private double _visualizerPhase = 0;
+
         private Grid? _currentActivePanel;
+        private string _currentActivePanelName = "Music";
 
         public MainWindow()
         {
+            App.Log("MainWindow ctor enter");
             InitializeComponent();
-            Closing += (s, e) => e.Cancel = true;
+            Closing += (s, e) => { App.Log("MainWindow Closing event triggered - cancelling"); e.Cancel = true; };
+            App.Log("MainWindow ctor exit");
         }
 
         private void Window_SourceInitialized(object sender, EventArgs e)
         {
-            var hwnd = new WindowInteropHelper(this).Handle;
-            Win32.MakeTransparent(hwnd);
-            Win32.SetWindowLongPtr(hwnd, Win32.GWL_EXSTYLE,
-                (nint)(Win32.GetWindowLongPtr(hwnd, Win32.GWL_EXSTYLE) | Win32.WS_EX_TOOLWINDOW | Win32.WS_EX_TOPMOST));
+            App.Log("Window_SourceInitialized enter");
+            try
+            {
+                var hwnd = new WindowInteropHelper(this).Handle;
+                Win32.MakeTransparent(hwnd);
+                Win32.SetWindowLongPtr(hwnd, Win32.GWL_EXSTYLE,
+                    (nint)(Win32.GetWindowLongPtr(hwnd, Win32.GWL_EXSTYLE) | Win32.WS_EX_TOOLWINDOW | Win32.WS_EX_TOPMOST));
 
-            UpdatePosition();
+                UpdatePosition();
+                App.Log("Window_SourceInitialized success");
+            }
+            catch (Exception ex)
+            {
+                App.Log($"Window_SourceInitialized exception: {ex}");
+            }
         }
 
         private void UpdatePosition()
@@ -59,47 +80,95 @@ namespace NotchIsland
 
         private async void Window_Loaded(object sender, RoutedEventArgs e)
         {
-            _currentActivePanel = PanelMusic;
+            App.Log("Window_Loaded enter");
+            try
+            {
+                _currentActivePanel = PanelMusic;
 
-            ShelfItemsControl.ItemsSource = FileShelfService.Items;
-            ClipboardItemsControl.ItemsSource = _clipboard.Items;
-            UpdateShelfStatus();
+                ShelfItemsControl.ItemsSource = FileShelfService.Items;
+                ClipboardItemsControl.ItemsSource = _clipboard.Items;
+                UpdateShelfStatus();
 
-            await _media.InitializeAsync();
-            _media.TrackChanged += OnTrackChanged;
-            _media.PositionChanged += OnPositionChanged;
+                App.Log("Initializing MediaService...");
+                await _media.InitializeAsync();
+                _media.TrackChanged += OnTrackChanged;
+                _media.PositionChanged += OnPositionChanged;
+                App.Log("MediaService initialized");
 
-            _deckServer.Start();
-            GenerateDeckQrCode();
+                App.Log("Starting DeckServer...");
+                _deckServer.Start();
+                GenerateDeckQrCode();
+                App.Log("DeckServer started");
 
-            // Fast Timer (60 FPS / 16ms animation loop)
-            _fastTimer = new DispatcherTimer(DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(16) };
-            _fastTimer.Tick += FastTimer_Tick;
-            _fastTimer.Start();
+                // 60 FPS Analytical Physics & Render Loop (16ms)
+                _renderLoop = new DispatcherTimer(DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(16) };
+                _renderLoop.Tick += RenderLoop_Tick;
+                _renderLoop.Start();
+                App.Log("RenderLoop started");
 
-            // Slow Timer (1000ms update loop)
-            _slowTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
-            _slowTimer.Tick += SlowTimer_Tick;
-            _slowTimer.Start();
+                // 1 Hz Background Telemetry Loop
+                _slowTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+                _slowTimer.Tick += SlowTimer_Tick;
+                _slowTimer.Start();
+                App.Log("SlowTimer started");
 
-            SlowTimer_Tick(null, EventArgs.Empty);
-            OnTrackChanged();
+                SlowTimer_Tick(null, EventArgs.Empty);
+                OnTrackChanged();
+                App.Log("Window_Loaded completed successfully");
+            }
+            catch (Exception ex)
+            {
+                App.Log($"Window_Loaded CRITICAL ERROR: {ex}");
+            }
         }
 
-        #region Animation & Updates
-        private void FastTimer_Tick(object? sender, EventArgs e)
+        #region Analytical Physics & 60 FPS Render Dispatcher
+        private void RenderLoop_Tick(object? sender, EventArgs e)
         {
-            _media.Tick(0.016);
+            const double dt = 0.016;
 
-            // Stopwatch
+            // 1. Analytical Spring Differential Solvers
+            _widthSpring.Update(dt);
+            _heightSpring.Update(dt);
+            _radiusSpring.Update(dt);
+            _pillAlphaSpring.Update(dt);
+            _cardAlphaSpring.Update(dt);
+            _tabSlideSpring.Update(dt);
+            _tabFadeSpring.Update(dt);
+
+            // 2. Direct Container Geometry & Alpha Update
+            IslandContainer.Width = _widthSpring.Value;
+            IslandContainer.Height = _heightSpring.Value;
+            IslandContainer.CornerRadius = new CornerRadius(_radiusSpring.Value);
+
+            PillContent.Opacity = _pillAlphaSpring.Value;
+            CardContent.Opacity = _cardAlphaSpring.Value;
+            CardContent.IsHitTestVisible = _cardAlphaSpring.Value > 0.4;
+
+            // 3. Tab Slide & Fade Update
+            if (_currentActivePanel != null)
+            {
+                _currentActivePanel.Opacity = _tabFadeSpring.Value;
+                if (_currentActivePanel.RenderTransform is TranslateTransform tt)
+                {
+                    tt.X = _tabSlideSpring.Value;
+                }
+                else
+                {
+                    _currentActivePanel.RenderTransform = new TranslateTransform(_tabSlideSpring.Value, 0);
+                }
+            }
+
+            // 4. Media Tick & Stopwatch
+            _media.Tick(dt);
             if (_stopwatch.IsRunning)
             {
                 var ts = _stopwatch.Elapsed;
                 StopwatchDisplay.Text = $"{ts.Minutes:D2}:{ts.Seconds:D2}.{ts.Milliseconds / 100}";
             }
 
-            // Smooth Harmonic Equalizer Visualizer
-            _visualizerPhase += 0.15;
+            // 5. Harmonic Equalizer Physics (Visualizer: "pixels")
+            _visualizerPhase += 0.16;
             if (_media.CurrentTrack.IsPlaying)
             {
                 Bar1.Height = 5 + Math.Abs(Math.Sin(_visualizerPhase * 1.2)) * 12;
@@ -115,7 +184,7 @@ namespace NotchIsland
                 Bar4.Height = 4;
             }
 
-            // Dynamic Pet
+            // 6. Desktop Pet Frame Switch
             _petAnimFrame = (_petAnimFrame + 1) % 60;
             if (_petAnimFrame == 0) PillPet.Text = "(=^･ω･^=)";
             else if (_petAnimFrame == 30) PillPet.Text = "(=^･ｪ･^=)";
@@ -139,10 +208,12 @@ namespace NotchIsland
                 if (_media.CurrentTrack.IsPlaying && !string.IsNullOrWhiteSpace(_media.CurrentTrack.Title))
                 {
                     PillTitle.Text = $"{_media.CurrentTrack.Title} • {_media.CurrentTrack.Artist}";
+                    _widthSpring.SetTarget(280.0);
                 }
                 else
                 {
                     PillTitle.Text = $"NotchIsland • {now:HH:mm}";
+                    _widthSpring.SetTarget(212.0);
                 }
             }
 
@@ -172,6 +243,7 @@ namespace NotchIsland
                 if (!_isExpanded && t.IsPlaying)
                 {
                     PillTitle.Text = $"{t.Title} • {t.Artist}";
+                    _widthSpring.SetTarget(280.0);
                 }
             });
         }
@@ -191,7 +263,7 @@ namespace NotchIsland
         }
         #endregion
 
-        #region Fluid Morphing Animation
+        #region Morphing State Machine (Pill <-> Card)
         private void Island_MouseEnter(object sender, MouseEventArgs e) { }
         private void Island_MouseLeave(object sender, MouseEventArgs e) { }
 
@@ -213,28 +285,20 @@ namespace NotchIsland
             if (_isExpanded) return;
             _isExpanded = true;
 
-            var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
-            var duration = TimeSpan.FromMilliseconds(300);
+            _widthSpring.Params = SpringParams.CardMorph;
+            _widthSpring.SetTarget(540.0);
 
-            // Morph Width & Height smoothly
-            var widthAnim = new DoubleAnimation(IslandContainer.ActualWidth, 560, duration) { EasingFunction = ease };
-            IslandContainer.BeginAnimation(WidthProperty, widthAnim);
+            _heightSpring.Params = SpringParams.CardMorph;
+            _heightSpring.SetTarget(270.0);
 
-            var heightAnim = new DoubleAnimation(IslandContainer.ActualHeight, 270, duration) { EasingFunction = ease };
-            IslandContainer.BeginAnimation(HeightProperty, heightAnim);
+            _radiusSpring.Params = SpringParams.Snappy;
+            _radiusSpring.SetTarget(24.0);
 
-            // Fade Out Pill
-            var fadePill = new DoubleAnimation(PillContent.Opacity, 0, TimeSpan.FromMilliseconds(120)) { EasingFunction = ease };
-            PillContent.BeginAnimation(OpacityProperty, fadePill);
+            _pillAlphaSpring.Params = SpringParams.Snappy;
+            _pillAlphaSpring.SetTarget(0.0);
 
-            // Fade In Card Content
-            CardContent.IsHitTestVisible = true;
-            var fadeCard = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(200))
-            {
-                BeginTime = TimeSpan.FromMilliseconds(90),
-                EasingFunction = ease
-            };
-            CardContent.BeginAnimation(OpacityProperty, fadeCard);
+            _cardAlphaSpring.Params = SpringParams.Snappy;
+            _cardAlphaSpring.SetTarget(1.0);
         }
 
         public void CollapseIsland()
@@ -242,32 +306,26 @@ namespace NotchIsland
             if (!_isExpanded) return;
             _isExpanded = false;
 
-            var ease = new CubicEase { EasingMode = EasingMode.EaseInOut };
-            var duration = TimeSpan.FromMilliseconds(260);
+            double targetW = (_media.CurrentTrack.IsPlaying && !string.IsNullOrWhiteSpace(_media.CurrentTrack.Title)) ? 280.0 : 212.0;
 
-            // Fade Out Card Content
-            CardContent.IsHitTestVisible = false;
-            var fadeCard = new DoubleAnimation(CardContent.Opacity, 0, TimeSpan.FromMilliseconds(90)) { EasingFunction = ease };
-            CardContent.BeginAnimation(OpacityProperty, fadeCard);
+            _widthSpring.Params = SpringParams.Snappy;
+            _widthSpring.SetTarget(targetW);
 
-            // Morph Width & Height back to Pill
-            var widthAnim = new DoubleAnimation(IslandContainer.ActualWidth, 320, duration) { EasingFunction = ease };
-            IslandContainer.BeginAnimation(WidthProperty, widthAnim);
+            _heightSpring.Params = SpringParams.Snappy;
+            _heightSpring.SetTarget(38.0);
 
-            var heightAnim = new DoubleAnimation(IslandContainer.ActualHeight, 40, duration) { EasingFunction = ease };
-            IslandContainer.BeginAnimation(HeightProperty, heightAnim);
+            _radiusSpring.Params = SpringParams.Snappy;
+            _radiusSpring.SetTarget(19.0);
 
-            // Fade In Pill Content
-            var fadePill = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(180))
-            {
-                BeginTime = TimeSpan.FromMilliseconds(80),
-                EasingFunction = ease
-            };
-            PillContent.BeginAnimation(OpacityProperty, fadePill);
+            _cardAlphaSpring.Params = SpringParams.Snappy;
+            _cardAlphaSpring.SetTarget(0.0);
+
+            _pillAlphaSpring.Params = SpringParams.Snappy;
+            _pillAlphaSpring.SetTarget(1.0);
         }
         #endregion
 
-        #region Navigation Tabs with Slide & Fade Transitions
+        #region Tab Transitions with Directional Glide
         private void Tab_Click(object sender, RoutedEventArgs e)
         {
             if (sender is Button btn && btn.Tag is string tabName)
@@ -280,20 +338,29 @@ namespace NotchIsland
         {
             Grid target = name switch
             {
-                "Music" => PanelMusic,
+                "Music" or "Media" => PanelMusic,
+                "Web" => PanelWeb,
+                "Notifications" => PanelNotifications,
+                "Chat" => PanelChat,
+                "Agents" => PanelAgents,
                 "Shelf" => PanelShelf,
                 "Clipboard" => PanelClipboard,
                 "Widgets" => PanelWidgets,
                 "Controls" => PanelControls,
-                "Web" => PanelWeb,
-                "Notifications" => PanelNotifications,
                 "Tools" => PanelTools,
                 "Deck" => PanelDeck,
+                "Tiles" => PanelTiles,
                 "Calls" => PanelCalls,
                 _ => PanelMusic
             };
 
             if (_currentActivePanel == target) return;
+
+            int targetIndex = GetTabIndex(name);
+            int currentIndex = GetTabIndex(_currentActivePanelName);
+            double slideDir = targetIndex >= currentIndex ? 24.0 : -24.0;
+
+            _currentActivePanelName = name;
 
             if (_currentActivePanel != null)
             {
@@ -305,23 +372,38 @@ namespace NotchIsland
 
             if (name == "Shelf") UpdateShelfStatus();
 
-            // Fluid slide-up and fade-in transition
-            var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
-            var fadeIn = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(180)) { EasingFunction = ease };
-            target.BeginAnimation(OpacityProperty, fadeIn);
+            // Trigger Spring Slide & Fade
+            _tabSlideSpring.SnapTo(slideDir);
+            _tabSlideSpring.SetTarget(0.0);
 
-            if (target.RenderTransform is not TranslateTransform tt)
-            {
-                tt = new TranslateTransform();
-                target.RenderTransform = tt;
-            }
-            var slideUp = new DoubleAnimation(8, 0, TimeSpan.FromMilliseconds(180)) { EasingFunction = ease };
-            tt.BeginAnimation(TranslateTransform.YProperty, slideUp);
+            _tabFadeSpring.SnapTo(0.0);
+            _tabFadeSpring.SetTarget(1.0);
         }
+
+        private static int GetTabIndex(string name) => name switch
+        {
+            "Music" or "Media" => 0,
+            "Web" => 1,
+            "Notifications" => 2,
+            "Chat" => 3,
+            "Agents" => 4,
+            "Shelf" => 5,
+            "Clipboard" => 6,
+            "Widgets" => 7,
+            "Controls" => 8,
+            "Tools" => 9,
+            "Deck" => 10,
+            "Tiles" => 11,
+            "Calls" => 12,
+            _ => 0
+        };
 
         private void SettingsBtn_Click(object sender, RoutedEventArgs e)
         {
-            _settingsWindow ??= new SettingsWindow();
+            if (_settingsWindow == null || !_settingsWindow.IsLoaded)
+            {
+                _settingsWindow = new SettingsWindow();
+            }
             _settingsWindow.Show();
             _settingsWindow.Activate();
         }
@@ -548,7 +630,7 @@ namespace NotchIsland
         private void ColorPickerBtn_Click(object sender, RoutedEventArgs e)
         {
             string hex = SystemControlService.PickColorUnderCursor();
-            MessageBox.Show($"Copied color to clipboard: {hex}", "NotchIsland Color Picker", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show($"Copied color to clipboard: {hex}", "NotchPixel Color Picker", MessageBoxButton.OK, MessageBoxImage.Information);
         }
 
         private void TaskManagerBtn_Click(object sender, RoutedEventArgs e)

@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="NotchIsland Settings"
-        Width="840" Height="680"
+        Width="860" Height="680"
         WindowStartupLocation="CenterScreen"
         WindowStyle="None"
         AllowsTransparency="True"
@@ -15,8 +15,8 @@
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="#A0FFFFFF" />
             <Setter Property="FontSize" Value="13" />
-            <Setter Property="Height" Value="40" />
-            <Setter Property="Margin" Value="0,2" />
+            <Setter Property="Height" Value="36" />
+            <Setter Property="Margin" Value="0,1" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Template">
                 <Setter.Value>
@@ -33,7 +33,7 @@
                             </Trigger>
                             <Trigger Property="IsChecked" Value="True">
                                 <Setter TargetName="border" Property="Background" Value="#25FFFFFF" />
-                                <Setter Property="Foreground" Value="#00F2FE" />
+                                <Setter Property="Foreground" Value="#64D2FF" />
                                 <Setter Property="FontWeight" Value="SemiBold" />
                             </Trigger>
                         </ControlTemplate.Triggers>
@@ -64,8 +64,8 @@
             <Grid Grid.Row="0" MouseLeftButtonDown="TitleBar_MouseLeftButtonDown" Background="Transparent">
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="20,0,0,0">
                     <TextBlock Text="NotchIsland" Foreground="#FFFFFF" FontSize="15" FontWeight="SemiBold" />
-                    <Border Background="#2000F2FE" CornerRadius="10" Padding="8,2" Margin="10,0,0,0">
-                        <TextBlock Text="v0.5.0" Foreground="#00F2FE" FontSize="11" FontWeight="Bold" />
+                    <Border Background="#2064D2FF" CornerRadius="10" Padding="8,2" Margin="10,0,0,0">
+                        <TextBlock Text="v0.5.108" Foreground="#64D2FF" FontSize="11" FontWeight="Bold" />
                     </Border>
                 </StackPanel>
 
@@ -94,25 +94,32 @@
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
 
-                <!-- Left Sidebar -->
-                <Border Grid.Column="0" BorderBrush="#15FFFFFF" BorderThickness="0,0,1,0" Padding="14,10">
-                    <StackPanel>
-                        <RadioButton Style="{StaticResource SidebarBtnStyle}" Content="⚙  General" IsChecked="True" Checked="Nav_Checked" Tag="General" />
-                        <RadioButton Style="{StaticResource SidebarBtnStyle}" Content="🎨  Appearance" Checked="Nav_Checked" Tag="Appearance" />
-                        <RadioButton Style="{StaticResource SidebarBtnStyle}" Content="🎵  Media &amp; Music" Checked="Nav_Checked" Tag="Media" />
-                        <RadioButton Style="{StaticResource SidebarBtnStyle}" Content="📁  Shelf &amp; Clipboard" Checked="Nav_Checked" Tag="Shelf" />
-                        <RadioButton Style="{StaticResource SidebarBtnStyle}" Content="🧩  Widgets" Checked="Nav_Checked" Tag="Widgets" />
-                        <RadioButton Style="{StaticResource SidebarBtnStyle}" Content="🎛  Controls &amp; HUDs" Checked="Nav_Checked" Tag="Controls" />
-                        <RadioButton Style="{StaticResource SidebarBtnStyle}" Content="⌨  Hotkeys" Checked="Nav_Checked" Tag="Hotkeys" />
-                        <RadioButton Style="{StaticResource SidebarBtnStyle}" Content="📱  PC Deck" Checked="Nav_Checked" Tag="Deck" />
-                        <RadioButton Style="{StaticResource SidebarBtnStyle}" Content="ℹ  About" Checked="Nav_Checked" Tag="About" />
-                    </StackPanel>
+                <!-- Left Sidebar (All 14 Categories) -->
+                <Border Grid.Column="0" BorderBrush="#15FFFFFF" BorderThickness="0,0,1,0" Padding="10,6">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel>
+                            <RadioButton Style="{StaticResource SidebarBtnStyle}" Content="⚙  General" IsChecked="True" Checked="Nav_Checked" Tag="General" />
+                            <RadioButton Style="{StaticResource SidebarBtnStyle}" Content="👁  Accessibility" Checked="Nav_Checked" Tag="Accessibility" />
+                            <RadioButton Style="{StaticResource SidebarBtnStyle}" Content="🎨  Appearance" Checked="Nav_Checked" Tag="Appearance" />
+                            <RadioButton Style="{StaticResource SidebarBtnStyle}" Content="🏝  Island" Checked="Nav_Checked" Tag="Island" />
+                            <RadioButton Style="{StaticResource SidebarBtnStyle}" Content="▔  Taskbar" Checked="Nav_Checked" Tag="Taskbar" />
+                            <RadioButton Style="{StaticResource SidebarBtnStyle}" Content="▦  Panels" Checked="Nav_Checked" Tag="Panels" />
+                            <RadioButton Style="{StaticResource SidebarBtnStyle}" Content="⏱  Widgets" Checked="Nav_Checked" Tag="Widgets" />
+                            <RadioButton Style="{StaticResource SidebarBtnStyle}" Content="🎙  Calls" Checked="Nav_Checked" Tag="Calls" />
+                            <RadioButton Style="{StaticResource SidebarBtnStyle}" Content="📻  Streaming" Checked="Nav_Checked" Tag="Streaming" />
+                            <RadioButton Style="{StaticResource SidebarBtnStyle}" Content="🎮  Gaming" Checked="Nav_Checked" Tag="Gaming" />
+                            <RadioButton Style="{StaticResource SidebarBtnStyle}" Content="🤖  AI agents" Checked="Nav_Checked" Tag="Agents" />
+                            <RadioButton Style="{StaticResource SidebarBtnStyle}" Content="⚡  Tools" Checked="Nav_Checked" Tag="Tools" />
+                            <RadioButton Style="{StaticResource SidebarBtnStyle}" Content="⌨  Keys" Checked="Nav_Checked" Tag="Keys" />
+                            <RadioButton Style="{StaticResource SidebarBtnStyle}" Content="ℹ  About" Checked="Nav_Checked" Tag="About" />
+                        </StackPanel>
+                    </ScrollViewer>
                 </Border>
 
                 <!-- Right View Panel -->
-                <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="24,14">
+                <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="26,14">
                     <StackPanel x:Name="ContentStack">
-                        <!-- Dynamic Section will be populated here in code-behind -->
+                        <!-- Dynamic Section populated in code-behind -->
                     </StackPanel>
                 </ScrollViewer>
             </Grid>

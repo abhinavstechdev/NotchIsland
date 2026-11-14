@@ -6,23 +6,41 @@ namespace NotchIsland
 {
     public partial class App : Application
     {
+        public static void Log(string msg)
+        {
+            try
+            {
+                File.AppendAllText(@"c:\project\rea\app_startup.log", $"[{DateTime.Now:HH:mm:ss.fff}] {msg}\r\n");
+            }
+            catch { }
+        }
+
         public App()
         {
+            Log("App ctor start");
             AppDomain.CurrentDomain.UnhandledException += (s, e) =>
             {
-                File.WriteAllText(@"c:\project\rea\crash.log", $"Unhandled: {e.ExceptionObject}");
+                Log($"Unhandled: {e.ExceptionObject}");
             };
 
             DispatcherUnhandledException += (s, e) =>
             {
-                File.WriteAllText(@"c:\project\rea\crash.log", $"Dispatcher: {e.Exception}");
+                Log($"Dispatcher: {e.Exception}");
                 e.Handled = true;
             };
 
             Exit += (s, e) =>
             {
-                File.AppendAllText(@"c:\project\rea\crash.log", $"\nApp.Exit: Code={e.ApplicationExitCode}\nStack:\n{Environment.StackTrace}");
+                Log($"App.Exit: Code={e.ApplicationExitCode}");
             };
+            Log("App ctor end");
+        }
+
+        protected override void OnStartup(StartupEventArgs e)
+        {
+            Log("App OnStartup start");
+            base.OnStartup(e);
+            Log("App OnStartup end");
         }
     }
 }

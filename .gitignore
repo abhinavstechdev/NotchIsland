@@ -4,3 +4,8 @@ obj/
 dist/
 *.user
 *.suo
+NotchIsland_App/
+*.exe
+*.pdb
+crash.log
+app_startup.log
