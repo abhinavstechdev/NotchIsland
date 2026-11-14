@@ -1,0 +1,37 @@
+[package]
+name = "notch_island"
+version = "0.1.0"
+edition = "2021"
+authors = ["Antigravity Swarm"]
+description = "Native Windows Dynamic Island & Notch built in Rust with high performance physics, media controls, telemetry, and Wi-Fi file shelf"
+
+[dependencies]
+eframe = { version = "0.29", default-features = false, features = ["default_fonts", "glow"] }
+egui = "0.29"
+sysinfo = "0.31"
+tiny_http = "0.12"
+qrcode = "0.14"
+crossbeam-channel = "0.5"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_System_Threading",
+    "Win32_System_SystemInformation"
+] }
+
+[target.'cfg(windows)'.build-dependencies]
+winres = "0.1"
+
+[lib]
+name = "notch_island"
+path = "src/lib.rs"
+
+[[bin]]
+name = "notch_island"
+path = "src/main.rs"
