@@ -42,6 +42,7 @@ impl NotchApp {
             if let Some(hwnd) = WindowManager::find_window_by_title(WINDOW_TITLE) {
                 self.window_manager.set_hwnd(hwnd as isize);
                 self.window_manager.apply_initial_styles();
+                self.window_manager.make_window_transparent();
                 self.window_manager.reassert_topmost();
                 self.initialized = true;
             }
@@ -54,6 +55,10 @@ impl NotchApp {
 }
 
 impl App for NotchApp {
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        // Return 100% transparent clear color so OpenGL never clears with dark grey
+        egui::Rgba::TRANSPARENT.to_array()
+    }
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.frame_counter += 1;
 
@@ -139,8 +144,8 @@ mod tests {
         let mut app = NotchApp::new();
         app.ui.set_mode(IslandMode::Expanded);
         assert_eq!(app.ui.mode, IslandMode::Expanded);
-        assert_eq!(app.ui.morph.width.target, 480.0);
-        assert_eq!(app.ui.morph.height.target, 230.0);
+        assert_eq!(app.ui.morph.width.target, 540.0);
+        assert_eq!(app.ui.morph.height.target, 280.0);
 
         app.ui.set_mode(IslandMode::Slim);
         assert_eq!(app.ui.mode, IslandMode::Slim);

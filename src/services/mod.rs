@@ -7,6 +7,11 @@ pub mod clipboard;
 pub mod notes;
 pub mod deck_server;
 pub mod indicators;
+pub mod notifications;
+pub mod calls;
+pub mod websites;
+pub mod tools;
+pub mod settings;
 
 pub use media::{MediaService, MediaTrack, PlaybackStatus};
 pub use telemetry::TelemetryService;
@@ -17,6 +22,11 @@ pub use clipboard::{ClipboardService, ClipboardSnippet};
 pub use notes::NotesService;
 pub use deck_server::DeckServerService;
 pub use indicators::SystemIndicators;
+pub use notifications::{NotificationsService, NotificationItem};
+pub use calls::{CallsService, AudioDeviceInfo};
+pub use websites::{WebsitesService, PinnedSite};
+pub use tools::ToolsService;
+pub use settings::{SettingsService, SettingsCategory, AppSettings};
 
 pub struct ServiceManager {
     pub media: MediaService,
@@ -28,6 +38,11 @@ pub struct ServiceManager {
     pub notes: NotesService,
     pub indicators: SystemIndicators,
     pub deck_server: DeckServerService,
+    pub notifications: NotificationsService,
+    pub calls: CallsService,
+    pub websites: WebsitesService,
+    pub tools: ToolsService,
+    pub settings: SettingsService,
 }
 
 impl Default for ServiceManager {
@@ -48,6 +63,11 @@ impl ServiceManager {
             notes: NotesService::new(),
             indicators: SystemIndicators::new(),
             deck_server: DeckServerService::new(),
+            notifications: NotificationsService::new(),
+            calls: CallsService::new(),
+            websites: WebsitesService::new(),
+            tools: ToolsService::new(),
+            settings: SettingsService::new(),
         }
     }
 
@@ -59,6 +79,8 @@ impl ServiceManager {
         self.timer.update();
         self.clipboard.update();
         self.indicators.update();
+        self.calls.update();
+        self.tools.update();
 
         // Synchronize state with background phone deck server and dispatch remote commands
         self.deck_server.sync_and_poll_commands(

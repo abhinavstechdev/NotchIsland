@@ -172,6 +172,23 @@ impl LockKeyMonitor {
     }
 }
 
+#[repr(C)]
+struct MARGINS {
+    cx_left_width: i32,
+    cx_right_width: i32,
+    cy_top_height: i32,
+    cy_bottom_height: i32,
+}
+
+#[cfg(windows)]
+#[link(name = "dwmapi")]
+extern "system" {
+    fn DwmExtendFrameIntoClientArea(
+        hwnd: windows_sys::Win32::Foundation::HWND,
+        p_mar_inset: *const MARGINS,
+    ) -> i32;
+}
+
 pub struct WindowManager {
     #[cfg(windows)]
     hwnd: Option<windows_sys::Win32::Foundation::HWND>,
@@ -375,6 +392,47 @@ impl WindowManager {
                     0,
                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED,
                 );
+
+                // Extend frame into client area for 100% glass transparency
+                let margins = MARGINS {
+                    cx_left_width: -1,
+                    cx_right_width: -1,
+                    cy_top_height: -1,
+                    cy_bottom_height: -1,
+                };
+                DwmExtendFrameIntoClientArea(hwnd, &margins);
+            }
+        }
+    }
+
+    /// Make the entire window client area 100% transparent using DWM frame extension
+    pub fn make_window_transparent(&self) {
+        #[cfg(windows)]
+        if let Some(hwnd) = self.hwnd {
+            unsafe {
+                let margins = MARGINS {
+                    cx_left_width: -1,
+                    cx_right_width: -1,
+                    cy_top_height: -1,
+                    cy_bottom_height: -1,
+                };
+                DwmExtendFrameIntoClientArea(hwnd, &margins);
+            }
+        }
+    }
+
+    /// Resize and reposition the window to match the current mode dimensions
+    pub fn resize_and_reposition(&self, width: f32, height: f32) {
+        let (x, y) = self.calculate_position(width, height);
+        #[cfg(windows)]
+        if let Some(hwnd) = self.hwnd {
+            unsafe {
+                use windows_sys::Win32::UI::WindowsAndMessaging::{SetWindowPos, HWND_TOPMOST, SWP_NOACTIVATE};
+                let w = (width * self.monitor_bounds.dpi_scale).round() as i32;
+                let h = (height * self.monitor_bounds.dpi_scale).round() as i32;
+                let px = (x * self.monitor_bounds.dpi_scale).round() as i32;
+                let py = (y * self.monitor_bounds.dpi_scale).round() as i32;
+                SetWindowPos(hwnd, HWND_TOPMOST, px, py, w, h, SWP_NOACTIVATE);
             }
         }
     }

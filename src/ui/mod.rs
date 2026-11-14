@@ -1,9 +1,9 @@
 use egui::{
-    pos2, vec2, Align2, Color32, FontData, FontDefinitions, FontFamily, FontId, Id, Painter,
-    Rect, Rounding, Sense, Shape, Stroke, Ui,
+    pos2, vec2, Align2, Color32, ComboBox, FontData, FontDefinitions, FontFamily, FontId, Id,
+    Painter, Rect, Rounding, Sense, Shape, Stroke, Ui,
 };
 use crate::physics::{generate_notch_path_points, generate_squircle_points, IslandMorphSpring};
-use crate::services::{PlaybackStatus, ServiceManager, TimerPhase};
+use crate::services::{PlaybackStatus, ServiceManager};
 
 /// Registers authentic Geist and Geist Mono font families extracted from NotchPixel
 pub fn configure_fonts(ctx: &egui::Context) {
@@ -37,10 +37,11 @@ pub fn configure_fonts(ctx: &egui::Context) {
     ctx.set_fonts(fonts);
 }
 
-// Authentic NotchPixel Color Palette (from assets/deck/style.css :root)
+// Authentic NotchPixel Design System Tokens (from assets/deck/style.css)
 pub const COLOR_ACCENT: Color32 = Color32::from_rgb(0x5e, 0xe9, 0xff); // #5ee9ff (Cyan)
 pub const COLOR_BG_BLACK: Color32 = Color32::from_rgb(0x00, 0x00, 0x00); // #000000 (Pitch Black)
 pub const COLOR_LINE: Color32 = Color32::from_rgba_premultiplied(255, 255, 255, 26); // rgba(255,255,255,0.1)
+pub const COLOR_LINE_DASH: Color32 = Color32::from_rgba_premultiplied(255, 255, 255, 38);
 pub const COLOR_GLASS: Color32 = Color32::from_rgba_premultiplied(255, 255, 255, 18); // rgba(255,255,255,0.07)
 pub const COLOR_GLASS_HI: Color32 = Color32::from_rgba_premultiplied(255, 255, 255, 33); // rgba(255,255,255,0.13)
 pub const COLOR_INK: Color32 = Color32::from_rgb(0xf4, 0xf4, 0xf5); // #f4f4f5 (White Ink)
@@ -57,22 +58,33 @@ pub enum IslandMode {
     Slim,
 }
 
+/// The exact 10 primary tabs matching the authentic NotchPixel bar
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CardTab {
-    Media,
-    Timer,
-    FileShelf,
+    Music,
+    Websites,
+    Notifications,
+    Shelf,
     Clipboard,
-    Notes,
-    Telemetry,
+    Widgets,
     Controls,
+    Tools,
     Deck,
+    Calls,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NotchStyle {
     FloatingIsland,
     BezelNotch,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThemeSurface {
+    Black,
+    Graphite,
+    Glass,
+    Acrylic,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -144,13 +156,28 @@ pub struct IslandUi {
     pub previous_mode: IslandMode,
     pub tab: CardTab,
     pub notch_style: NotchStyle,
+    pub surface: ThemeSurface,
     pub pet: DesktopPet,
     pub show_pet: bool,
     pub morph: IslandMorphSpring,
     pub is_hovered: bool,
     pub anim_time: f32,
     pub auto_expand_on_hover: bool,
-    pub power_plan: usize, // 0 = Balanced, 1 = High Perf, 2 = Battery Saver
+    pub show_settings: bool,
+    pub settings_category: usize,
+
+    // Toggles & state for exact tabs
+    pub wifi_on: bool,
+    pub bluetooth_on: bool,
+    pub night_light_on: bool,
+    pub focus_assist_on: bool,
+    pub battery_saver_on: bool,
+    pub power_mode: usize, // 0 = Best power, 1 = Balanced, 2 = Best performance
+    pub clipboard_filter: usize, // 0 = All, 1 = Images, 2 = Snippets
+    pub selected_speaker: usize,
+    pub selected_mic: usize,
+    pub speaker_tested: bool,
+    pub mic_tested: bool,
 }
 
 impl Default for IslandUi {
@@ -164,15 +191,29 @@ impl IslandUi {
         Self {
             mode: IslandMode::Compact,
             previous_mode: IslandMode::Compact,
-            tab: CardTab::Media,
+            tab: CardTab::Music,
             notch_style: NotchStyle::FloatingIsland,
+            surface: ThemeSurface::Black,
             pet: DesktopPet::default(),
             show_pet: true,
             morph: IslandMorphSpring::new(230.0, 38.0, 19.0),
             is_hovered: false,
             anim_time: 0.0,
             auto_expand_on_hover: true,
-            power_plan: 0,
+            show_settings: false,
+            settings_category: 0,
+
+            wifi_on: true,
+            bluetooth_on: true,
+            night_light_on: false,
+            focus_assist_on: false,
+            battery_saver_on: false,
+            power_mode: 1, // Balanced
+            clipboard_filter: 0,
+            selected_speaker: 0,
+            selected_mic: 0,
+            speaker_tested: false,
+            mic_tested: false,
         }
     }
 
@@ -187,7 +228,7 @@ impl IslandUi {
                 self.morph.set_target_geometry(230.0, 38.0, 19.0);
             }
             IslandMode::Expanded => {
-                self.morph.set_target_geometry(480.0, 230.0, 24.0);
+                self.morph.set_target_geometry(540.0, 280.0, 24.0);
             }
             IslandMode::Slim => {
                 self.morph.set_target_geometry(380.0, 28.0, 14.0);
@@ -218,7 +259,6 @@ impl IslandUi {
             current_size,
         );
 
-        // Interactivity bounding response
         let island_id = Id::new("notch_island_interaction_main");
         let response = ui.interact(island_rect, island_id, Sense::click());
         self.is_hovered = response.hovered();
@@ -240,13 +280,13 @@ impl IslandUi {
         // 1. Paint background with squircle continuous curvature
         self.paint_background(&painter, island_rect);
 
-        // 2. Render Desktop Pet (sitting perched on top edge or left)
-        if self.show_pet && self.mode != IslandMode::Slim {
+        // 2. Render Desktop Pet (perched on top edge)
+        if self.show_pet && self.mode != IslandMode::Slim && !self.show_settings {
             self.render_pet_badge(ui, &painter, island_rect);
         }
 
         // 3. Paint active view content
-        let content_rect = island_rect.shrink2(vec2(12.0, 8.0));
+        let content_rect = island_rect.shrink2(vec2(14.0, 10.0));
 
         if current_size.y >= 26.0 {
             match self.mode {
@@ -259,14 +299,17 @@ impl IslandUi {
                 IslandMode::Expanded => {
                     if current_size.y > 100.0 {
                         ui.allocate_new_ui(egui::UiBuilder::new().max_rect(content_rect), |child_ui| {
-                            self.render_expanded_view(child_ui, content_rect, services);
+                            if self.show_settings {
+                                self.render_settings_view(child_ui, services);
+                            } else {
+                                self.render_expanded_view(child_ui, content_rect, services);
+                            }
                         });
                     }
                 }
             }
         }
 
-        // Keep repainting if animations or playback or timer are active
         if !self.morph.is_settled()
             || services.media.status == PlaybackStatus::Playing
             || services.timer.is_running
@@ -279,10 +322,15 @@ impl IslandUi {
         let corner_radius = self.morph.corner_radius.current;
         let opacity = self.morph.opacity.current.clamp(0.0, 1.0);
 
-        // Pitch Black matching NotchPixel
-        let bg_color = Color32::from_rgba_premultiplied(0, 0, 0, (252.0 * opacity) as u8);
-        let border_color = Color32::from_rgba_premultiplied(255, 255, 255, (28.0 * opacity) as u8);
-        let shadow_color = Color32::from_rgba_premultiplied(0, 0, 0, (120.0 * opacity) as u8);
+        let bg_color = match self.surface {
+            ThemeSurface::Black => Color32::from_rgba_premultiplied(0, 0, 0, (252.0 * opacity) as u8),
+            ThemeSurface::Graphite => Color32::from_rgba_premultiplied(18, 18, 22, (248.0 * opacity) as u8),
+            ThemeSurface::Glass => Color32::from_rgba_premultiplied(12, 16, 24, (230.0 * opacity) as u8),
+            ThemeSurface::Acrylic => Color32::from_rgba_premultiplied(15, 15, 20, (215.0 * opacity) as u8),
+        };
+
+        let border_color = Color32::from_rgba_premultiplied(255, 255, 255, (26.0 * opacity) as u8);
+        let shadow_color = Color32::from_rgba_premultiplied(0, 0, 0, (110.0 * opacity) as u8);
 
         if self.notch_style == NotchStyle::FloatingIsland {
             let shadow_rect = rect.expand(4.0).translate(vec2(0.0, 3.0));
@@ -306,8 +354,8 @@ impl IslandUi {
     fn render_pet_badge(&mut self, ui: &mut Ui, painter: &Painter, island_rect: Rect) {
         let pet_bounce = (self.anim_time * 2.5).sin() * 1.5;
         let pet_rect = Rect::from_center_size(
-            pos2(island_rect.left() + 24.0, island_rect.top() - 6.0 + pet_bounce),
-            vec2(72.0, 20.0),
+            pos2(island_rect.left() + 26.0, island_rect.top() - 6.0 + pet_bounce),
+            vec2(74.0, 20.0),
         );
 
         let pet_resp = ui.interact(pet_rect, Id::new("desktop_pet_click"), Sense::click());
@@ -315,21 +363,11 @@ impl IslandUi {
             self.pet.on_click();
         }
 
-        let pet_bg = if pet_resp.hovered() {
-            COLOR_GLASS_HI
-        } else {
-            COLOR_GLASS
-        };
-
+        let pet_bg = if pet_resp.hovered() { COLOR_GLASS_HI } else { COLOR_GLASS };
         painter.rect_filled(pet_rect, Rounding::same(10.0), pet_bg);
         painter.rect_stroke(pet_rect, Rounding::same(10.0), Stroke::new(1.0_f32, COLOR_LINE));
 
-        let text_color = if self.pet.is_happy {
-            COLOR_ACCENT
-        } else {
-            COLOR_INK
-        };
-
+        let text_color = if self.pet.is_happy { COLOR_ACCENT } else { COLOR_INK };
         painter.text(
             pet_rect.center(),
             Align2::CENTER_CENTER,
@@ -343,10 +381,8 @@ impl IslandUi {
         let track = services.media.current_track();
         let is_playing = services.media.status == PlaybackStatus::Playing;
 
-        // Visualizer or timer on left
         let left_start = rect.left() + 10.0;
         if services.timer.is_running {
-            // Display mini pomodoro timer countdown
             painter.text(
                 pos2(left_start, rect.center().y),
                 Align2::LEFT_CENTER,
@@ -355,20 +391,14 @@ impl IslandUi {
                 COLOR_WARM,
             );
         } else {
-            // Animated 3-bar music visualizer
             for i in 0..3 {
                 let phase = self.anim_time * 6.0 + (i as f32) * 1.5;
-                let bar_h = if is_playing {
-                    6.0 + 8.0 * (phase.sin().abs())
-                } else {
-                    4.0
-                };
+                let bar_h = if is_playing { 6.0 + 8.0 * (phase.sin().abs()) } else { 4.0 };
                 let bar_x = left_start + (i as f32) * 4.0;
                 let bar_rect = Rect::from_center_size(pos2(bar_x, rect.center().y), vec2(2.5, bar_h));
                 painter.rect_filled(bar_rect, Rounding::same(1.0), COLOR_ACCENT);
             }
 
-            // Track title
             let text_rect_left = left_start + 18.0;
             let snippet = if track.title.len() > 16 {
                 format!("{}...", &track.title[..14])
@@ -385,15 +415,10 @@ impl IslandUi {
             );
         }
 
-        // Hardware indicator dots on right (Caps Lock / Mic / Vol)
         let right_center = pos2(rect.right() - 8.0, rect.center().y);
         let mut glyphs = String::new();
-        if services.indicators.caps_lock {
-            glyphs.push_str("🔠 ");
-        }
-        if services.indicators.mic_active {
-            glyphs.push_str("🔴 ");
-        }
+        if services.indicators.caps_lock { glyphs.push_str("🔠 "); }
+        if services.indicators.mic_active { glyphs.push_str("🔴 "); }
         if services.controls.is_muted {
             glyphs.push_str("🔇");
         } else if is_playing {
@@ -402,13 +427,7 @@ impl IslandUi {
             glyphs.push_str("⏸");
         }
 
-        painter.text(
-            right_center,
-            Align2::RIGHT_CENTER,
-            glyphs,
-            FontId::proportional(11.0),
-            COLOR_DIM,
-        );
+        painter.text(right_center, Align2::RIGHT_CENTER, glyphs, FontId::proportional(11.0), COLOR_DIM);
     }
 
     fn paint_slim_view(&self, painter: &Painter, rect: Rect, services: &ServiceManager) {
@@ -435,56 +454,50 @@ impl IslandUi {
         }
     }
 
+    /// Renders the authentic expanded card with exact 10-tab bar + Settings and Theme on the right
     fn render_expanded_view(&mut self, ui: &mut Ui, _rect: Rect, services: &mut ServiceManager) {
         ui.vertical(|ui| {
-            // Header: App Logo, Tabs, and Collapse
+            // --- Exact 10-Tab Navigation Bar ---
             ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new("⚡ NotchPixel")
-                        .color(COLOR_ACCENT)
-                        .size(13.0)
-                        .strong(),
-                );
-
-                ui.add_space(4.0);
-
-                // Tab Switcher
                 let tabs = [
-                    (CardTab::Media, "🎵"),
-                    (CardTab::Timer, "⏱️"),
-                    (CardTab::FileShelf, "📁"),
-                    (CardTab::Clipboard, "📋"),
-                    (CardTab::Notes, "📝"),
-                    (CardTab::Telemetry, "⚡"),
-                    (CardTab::Controls, "🎛️"),
-                    (CardTab::Deck, "📱"),
+                    (CardTab::Music, "🎵", "Music"),
+                    (CardTab::Websites, "🌐", "Websites"),
+                    (CardTab::Notifications, "🔔", "Notices"),
+                    (CardTab::Shelf, "📁", "Shelf"),
+                    (CardTab::Clipboard, "📋", "Clips"),
+                    (CardTab::Widgets, "⊞", "Widgets"),
+                    (CardTab::Controls, "🎚️", "Controls"),
+                    (CardTab::Tools, "⠿", "Tools"),
+                    (CardTab::Deck, "📱", "Deck"),
+                    (CardTab::Calls, "🎧", "Calls"),
                 ];
 
-                for (tab_kind, label) in tabs {
+                for (tab_kind, icon, tooltip) in tabs {
                     let is_active = self.tab == tab_kind;
-                    let (bg, text_color) = if is_active {
+                    let (bg, text_col) = if is_active {
                         (COLOR_GLASS_HI, COLOR_ACCENT)
                     } else {
                         (Color32::TRANSPARENT, COLOR_DIM)
                     };
 
                     let btn = egui::Button::new(
-                        egui::RichText::new(label).color(text_color).size(12.0),
+                        egui::RichText::new(icon).color(text_col).size(13.0),
                     )
                     .fill(bg)
                     .rounding(Rounding::same(6.0));
 
-                    if ui.add(btn).clicked() {
+                    if ui.add(btn).on_hover_text(tooltip).clicked() {
                         self.tab = tab_kind;
                     }
                 }
 
-                // Collapse Button
+                // Right side: Theme button, Gear (Settings), and Collapse
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    // Collapse button
                     if ui
                         .add(
                             egui::Button::new(
-                                egui::RichText::new("▲").color(COLOR_DIM).size(12.0),
+                                egui::RichText::new("▲").color(COLOR_DIM).size(11.0),
                             )
                             .fill(COLOR_GLASS)
                             .rounding(Rounding::same(12.0)),
@@ -494,77 +507,135 @@ impl IslandUi {
                     {
                         self.set_mode(IslandMode::Compact);
                     }
+
+                    // Settings Gear Button
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new("⚙").color(COLOR_DIM).size(13.0),
+                            )
+                            .fill(COLOR_GLASS)
+                            .rounding(Rounding::same(6.0)),
+                        )
+                        .on_hover_text("Settings")
+                        .clicked()
+                    {
+                        self.show_settings = true;
+                    }
+
+                    // Theme Surface Switcher Button
+                    let theme_icon = match self.surface {
+                        ThemeSurface::Black => "⬛",
+                        ThemeSurface::Graphite => "◼",
+                        ThemeSurface::Glass => "🔹",
+                        ThemeSurface::Acrylic => "▫",
+                    };
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new(theme_icon).color(COLOR_DIM).size(11.0),
+                            )
+                            .fill(COLOR_GLASS)
+                            .rounding(Rounding::same(6.0)),
+                        )
+                        .on_hover_text("Cycle Surface Theme: Black / Graphite / Glass / Acrylic")
+                        .clicked()
+                    {
+                        self.surface = match self.surface {
+                            ThemeSurface::Black => ThemeSurface::Graphite,
+                            ThemeSurface::Graphite => ThemeSurface::Glass,
+                            ThemeSurface::Glass => ThemeSurface::Acrylic,
+                            ThemeSurface::Acrylic => ThemeSurface::Black,
+                        };
+                    }
                 });
             });
 
-            ui.add_space(4.0);
+            ui.add_space(3.0);
             ui.separator();
-            ui.add_space(4.0);
+            ui.add_space(3.0);
 
-            // Active Tab View Content
+            // --- Body: Render Selected Tab View ---
             match self.tab {
-                CardTab::Media => self.render_media_tab(ui, services),
-                CardTab::Timer => self.render_timer_tab(ui, services),
-                CardTab::FileShelf => self.render_file_shelf_tab(ui, services),
-                CardTab::Clipboard => self.render_clipboard_tab(ui, services),
-                CardTab::Notes => self.render_notes_tab(ui, services),
-                CardTab::Telemetry => self.render_telemetry_tab(ui, services),
-                CardTab::Controls => self.render_controls_tab(ui, services),
-                CardTab::Deck => self.render_deck_tab(ui, services),
+                CardTab::Music => self.render_tab_music(ui, services),
+                CardTab::Websites => self.render_tab_websites(ui, services),
+                CardTab::Notifications => self.render_tab_notifications(ui, services),
+                CardTab::Shelf => self.render_tab_shelf(ui, services),
+                CardTab::Clipboard => self.render_tab_clipboard(ui, services),
+                CardTab::Widgets => self.render_tab_widgets(ui, services),
+                CardTab::Controls => self.render_tab_controls(ui, services),
+                CardTab::Tools => self.render_tab_tools(ui, services),
+                CardTab::Deck => self.render_tab_deck(ui, services),
+                CardTab::Calls => self.render_tab_calls(ui, services),
             }
         });
     }
 
-    fn render_media_tab(&mut self, ui: &mut Ui, services: &mut ServiceManager) {
+    // ==========================================
+    // TAB 1: MUSIC (Image 2)
+    // ==========================================
+    fn render_tab_music(&mut self, ui: &mut Ui, services: &mut ServiceManager) {
         let track = services.media.current_track().clone();
         let is_playing = services.media.status == PlaybackStatus::Playing;
 
         ui.horizontal(|ui| {
-            // Vinyl Record Disc
-            let disc_size = vec2(72.0, 72.0);
-            let (disc_rect, _resp) = ui.allocate_exact_size(disc_size, Sense::hover());
-            let painter = ui.painter_at(disc_rect);
+            // Album art with corner music badge
+            let art_size = vec2(76.0, 76.0);
+            let (art_rect, _resp) = ui.allocate_exact_size(art_size, Sense::hover());
+            let painter = ui.painter_at(art_rect);
 
-            painter.circle_filled(disc_rect.center(), disc_size.x * 0.5, Color32::from_rgb(18, 18, 22));
-            painter.circle_stroke(disc_rect.center(), disc_size.x * 0.5, Stroke::new(1.0_f32, COLOR_LINE));
-            painter.circle_filled(disc_rect.center(), disc_size.x * 0.22, COLOR_ACCENT);
-            painter.circle_filled(disc_rect.center(), disc_size.x * 0.06, Color32::BLACK);
+            painter.rect_filled(art_rect, Rounding::same(10.0), Color32::from_rgb(22, 22, 28));
+            painter.rect_stroke(art_rect, Rounding::same(10.0), Stroke::new(1.0_f32, COLOR_LINE));
+
+            let center = art_rect.center();
+            painter.circle_filled(center, 22.0, Color32::from_rgb(35, 38, 50));
+            painter.circle_filled(center, 8.0, COLOR_ACCENT);
+
+            // Mini music note badge in bottom right corner
+            let badge_rect = Rect::from_center_size(
+                pos2(art_rect.right() - 8.0, art_rect.bottom() - 8.0),
+                vec2(16.0, 16.0),
+            );
+            painter.rect_filled(badge_rect, Rounding::same(4.0), Color32::BLACK);
+            painter.text(badge_rect.center(), Align2::CENTER_CENTER, "🎵", FontId::proportional(9.0), COLOR_INK);
 
             ui.add_space(10.0);
 
+            // Metadata, Scrubber with elapsed & remaining, Transport controls
             ui.vertical(|ui| {
                 ui.label(egui::RichText::new(&track.title).color(COLOR_INK).size(14.0).strong());
-                ui.label(egui::RichText::new(format!("{} • {}", track.artist, track.album)).color(COLOR_DIM).size(11.5));
+                ui.label(egui::RichText::new(&track.artist).color(COLOR_DIM).size(12.0));
 
                 ui.add_space(4.0);
 
-                // Scrubber slider
+                // Progress scrubber
                 let mut progress = track.progress_ratio();
                 if ui.add(egui::Slider::new(&mut progress, 0.0..=1.0).show_value(false).trailing_fill(true)).changed() {
                     services.media.seek_ratio(progress);
                 }
 
+                // Elapsed time and remaining time in negative format (-X:XX)
+                let elapsed_str = track.formatted_current_time();
+                let rem_secs = (track.duration_secs - track.current_pos_secs).max(0.0);
+                let rem_str = format!("-{:02}:{:02}", (rem_secs / 60.0) as u32, (rem_secs % 60.0) as u32);
+
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(track.formatted_current_time()).color(COLOR_FAINT).size(10.5));
+                    ui.label(egui::RichText::new(elapsed_str).color(COLOR_FAINT).size(10.5));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(egui::RichText::new(track.formatted_duration()).color(COLOR_FAINT).size(10.5));
+                        ui.label(egui::RichText::new(rem_str).color(COLOR_FAINT).size(10.5));
                     });
                 });
 
                 ui.add_space(2.0);
 
-                // Controls row
+                // Transport Controls
                 ui.horizontal(|ui| {
-                    if ui.button("⏮").clicked() {
-                        services.media.previous();
-                    }
-                    let play_label = if is_playing { "⏸" } else { "▶" };
-                    if ui.add(egui::Button::new(egui::RichText::new(play_label).color(Color32::BLACK).strong()).fill(COLOR_ACCENT)).clicked() {
+                    if ui.button("⏮").clicked() { services.media.previous(); }
+                    let play_icon = if is_playing { "⏸" } else { "▶" };
+                    if ui.add(egui::Button::new(egui::RichText::new(play_icon).color(Color32::BLACK).strong()).fill(COLOR_ACCENT)).clicked() {
                         services.media.toggle_play_pause();
                     }
-                    if ui.button("⏭").clicked() {
-                        services.media.next();
-                    }
+                    if ui.button("⏭").clicked() { services.media.next(); }
 
                     ui.add_space(16.0);
                     ui.label("🔊");
@@ -578,386 +649,583 @@ impl IslandUi {
         });
     }
 
-    fn render_timer_tab(&mut self, ui: &mut Ui, services: &mut ServiceManager) {
-        ui.horizontal(|ui| {
-            // Circular Ring Progress Graphic
-            let ring_size = vec2(76.0, 76.0);
-            let (ring_rect, _resp) = ui.allocate_exact_size(ring_size, Sense::hover());
-            let painter = ui.painter_at(ring_rect);
+    // ==========================================
+    // TAB 2: WEBSITES (Globe, Image 3)
+    // ==========================================
+    fn render_tab_websites(&mut self, ui: &mut Ui, services: &mut ServiceManager) {
+        ui.vertical(|ui| {
+            ui.label(egui::RichText::new("Add a site: any page, signed in, one click away.").color(COLOR_DIM).size(12.0));
+            ui.add_space(10.0);
 
-            let center = ring_rect.center();
-            let radius = ring_size.x * 0.44;
-            painter.circle_stroke(center, radius, Stroke::new(4.0_f32, COLOR_LINE));
+            ui.horizontal(|ui| {
+                let sites = services.websites.sites.clone();
+                for site in &sites {
+                    let card_btn = egui::Button::new(
+                        egui::RichText::new(format!("{}\n{}", site.icon_letter, site.name)).color(COLOR_INK).size(11.5),
+                    )
+                    .fill(COLOR_GLASS)
+                    .rounding(Rounding::same(8.0))
+                    .min_size(vec2(95.0, 68.0));
 
-            let progress = services.timer.progress_ratio();
-            let steps = 32;
-            for i in 0..steps {
-                let frac = i as f32 / steps as f32;
-                if frac <= progress {
-                    let a = -std::f32::consts::FRAC_PI_2 + frac * std::f32::consts::TAU;
-                    let pt = center + vec2(a.cos(), a.sin()) * radius;
-                    painter.circle_filled(pt, 2.5, COLOR_WARM);
+                    if ui.add(card_btn).clicked() {
+                        services.websites.launch(&site.url);
+                    }
+                    ui.add_space(6.0);
                 }
-            }
 
-            painter.text(
-                center,
-                Align2::CENTER_CENTER,
-                services.timer.formatted_remaining(),
-                FontId::monospace(14.0),
-                COLOR_INK,
-            );
+                // Dashed "+ Add a site" card
+                let add_btn = egui::Button::new(
+                    egui::RichText::new("+\nAdd a site").color(COLOR_FAINT).size(11.0),
+                )
+                .fill(Color32::TRANSPARENT)
+                .stroke(Stroke::new(1.0_f32, COLOR_LINE_DASH))
+                .rounding(Rounding::same(8.0))
+                .min_size(vec2(95.0, 68.0));
 
-            ui.add_space(12.0);
+                if ui.add(add_btn).clicked() {
+                    services.websites.add_site("GitHub", "https://github.com");
+                }
+            });
+        });
+    }
 
+    // ==========================================
+    // TAB 3: NOTIFICATIONS (Bell, Image 4)
+    // ==========================================
+    fn render_tab_notifications(&mut self, ui: &mut Ui, services: &mut ServiceManager) {
+        if services.notifications.is_empty() {
+            ui.vertical_centered(|ui| {
+                ui.add_space(14.0);
+                ui.label(egui::RichText::new("🔔").color(COLOR_DIM).size(36.0));
+                ui.add_space(4.0);
+                ui.label(egui::RichText::new("Nothing yet").color(COLOR_INK).size(14.0).strong());
+                ui.label(egui::RichText::new("What the island says lands here. Click one to open it.").color(COLOR_FAINT).size(11.5));
+                ui.add_space(8.0);
+                if ui.button(egui::RichText::new("Test notice").color(COLOR_ACCENT).size(11.0)).clicked() {
+                    services.notifications.add("NotchPixel", "Welcome to NotchPixel", "All systems operational.", "✨");
+                }
+            });
+        } else {
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(services.timer.phase.label()).color(COLOR_WARM).strong());
-                    ui.label(egui::RichText::new(format!("• 🍅 {} sessions", services.timer.completed_sessions)).color(COLOR_DIM).size(11.0));
+                    ui.label(egui::RichText::new(format!("Notifications ({})", services.notifications.items.len())).color(COLOR_INK).strong());
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("Clear all").clicked() {
+                            services.notifications.clear();
+                        }
+                    });
                 });
-
                 ui.add_space(4.0);
-
-                // Start/Pause & Reset buttons
-                ui.horizontal(|ui| {
-                    let start_label = if services.timer.is_running { "⏸ Pause" } else { "▶ Start" };
-                    if ui.add(egui::Button::new(start_label).fill(COLOR_WARM)).clicked() {
-                        services.timer.toggle_start_pause();
-                    }
-                    if ui.button("🔄 Reset").clicked() {
-                        services.timer.reset();
-                    }
-                    if ui.button("+15m").clicked() {
-                        services.timer.add_minutes(15.0);
-                    }
-                    if ui.button("+1h").clicked() {
-                        services.timer.add_minutes(60.0);
+                let items = services.notifications.items.clone();
+                egui::ScrollArea::vertical().max_height(140.0).show(ui, |ui| {
+                    for item in items {
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new(&item.app_name).color(COLOR_ACCENT).size(10.5));
+                            ui.label(egui::RichText::new(&item.title).color(COLOR_INK).size(11.5).strong());
+                            ui.label(egui::RichText::new(&item.body).color(COLOR_DIM).size(11.0));
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui.button("✕").clicked() {
+                                    services.notifications.remove(item.id);
+                                }
+                            });
+                        });
                     }
                 });
+            });
+        }
+    }
 
-                ui.add_space(6.0);
+    // ==========================================
+    // TAB 4: SHELF (Folder, Image 5)
+    // ==========================================
+    fn render_tab_shelf(&mut self, ui: &mut Ui, services: &mut ServiceManager) {
+        ui.vertical(|ui| {
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Shelf").color(COLOR_INK).size(13.0).strong());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("📱 Send to phone").clicked() {
+                        self.tab = CardTab::Deck;
+                    }
+                });
+            });
 
-                // Preset Phase Switches
-                ui.horizontal(|ui| {
-                    if ui.selectable_label(services.timer.phase == TimerPhase::Work, "25m Work").clicked() {
-                        services.timer.set_phase(TimerPhase::Work);
+            ui.add_space(4.0);
+
+            // Dashed drop zone box
+            let drop_size = vec2(ui.available_width(), 76.0);
+            let (drop_rect, _resp) = ui.allocate_exact_size(drop_size, Sense::hover());
+            let painter = ui.painter_at(drop_rect);
+
+            painter.rect_stroke(drop_rect, Rounding::same(8.0), Stroke::new(1.2_f32, COLOR_LINE_DASH));
+            painter.text(
+                pos2(drop_rect.center().x, drop_rect.center().y - 8.0),
+                Align2::CENTER_CENTER,
+                "Drop files here",
+                FontId::proportional(12.5),
+                COLOR_INK,
+            );
+            painter.text(
+                pos2(drop_rect.center().x, drop_rect.center().y + 10.0),
+                Align2::CENTER_CENTER,
+                "They wait here until you need them",
+                FontId::proportional(11.0),
+                COLOR_FAINT,
+            );
+
+            ui.add_space(4.0);
+
+            // Staged items preview
+            let items = services.file_shelf.get_items();
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new(format!("{} staged items", items.len())).color(COLOR_FAINT).size(10.5));
+                if ui.button("➕ Sample").clicked() {
+                    services.file_shelf.add_file("document.pdf", vec![0x25, 0x50, 0x44, 0x46]);
+                }
+                if ui.button("🗑 Clear").clicked() {
+                    services.file_shelf.clear();
+                }
+            });
+        });
+    }
+
+    // ==========================================
+    // TAB 5: CLIPBOARD (Image 6)
+    // ==========================================
+    fn render_tab_clipboard(&mut self, ui: &mut Ui, services: &mut ServiceManager) {
+        ui.vertical(|ui| {
+            // Filter Pills & Clear button
+            ui.horizontal(|ui| {
+                let filters = ["All", "Images", "Snippets"];
+                for (idx, name) in filters.iter().enumerate() {
+                    let is_active = self.clipboard_filter == idx;
+                    let (bg, col) = if is_active { (COLOR_GLASS_HI, COLOR_ACCENT) } else { (Color32::TRANSPARENT, COLOR_DIM) };
+                    if ui.add(egui::Button::new(egui::RichText::new(*name).color(col).size(11.0)).fill(bg)).clicked() {
+                        self.clipboard_filter = idx;
                     }
-                    if ui.selectable_label(services.timer.phase == TimerPhase::ShortBreak, "5m Break").clicked() {
-                        services.timer.set_phase(TimerPhase::ShortBreak);
+                }
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("🗑 Clear").clicked() {
+                        services.clipboard.clear_unpinned();
                     }
-                    if ui.selectable_label(services.timer.phase == TimerPhase::LongBreak, "15m Long").clicked() {
-                        services.timer.set_phase(TimerPhase::LongBreak);
-                    }
+                });
+            });
+
+            ui.add_space(4.0);
+
+            // Snippet cards
+            let snippets = services.clipboard.snippets.clone();
+            egui::ScrollArea::vertical().max_height(130.0).show(ui, |ui| {
+                if snippets.is_empty() {
+                    ui.label(egui::RichText::new("Clipboard is empty.").color(COLOR_FAINT));
+                }
+
+                for snip in snippets {
+                    ui.horizontal(|ui| {
+                        let pin_icon = if snip.is_pinned { "📌" } else { "📍" };
+                        if ui.button(pin_icon).clicked() {
+                            services.clipboard.toggle_pin(snip.id);
+                        }
+
+                        ui.label(egui::RichText::new(snip.preview(28)).color(COLOR_INK).size(11.5));
+
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button("✕").clicked() { services.clipboard.remove(snip.id); }
+                            if ui.button("Copy").clicked() { services.clipboard.copy_to_clipboard(snip.id); }
+                        });
+                    });
+                }
+            });
+        });
+    }
+
+    // ==========================================
+    // TAB 6: WIDGETS (4-Bento Grid, Image 7)
+    // ==========================================
+    fn render_tab_widgets(&mut self, ui: &mut Ui, services: &mut ServiceManager) {
+        let bento_w = (ui.available_width() - 8.0) * 0.5;
+        let bento_h = 70.0;
+
+        ui.vertical(|ui| {
+            // Row 1: Date & Focus Timer
+            ui.horizontal(|ui| {
+                // Bento 1: Date
+                ui.group(|ui| {
+                    ui.set_width(bento_w);
+                    ui.set_height(bento_h);
+                    ui.label(egui::RichText::new("Saturday, Nov 14").color(COLOR_INK).size(12.0).strong());
+                    ui.horizontal(|ui| {
+                        for d in ["M", "T", "W", "T", "F", "S", "S"] {
+                            let is_today = d == "S";
+                            let col = if is_today { COLOR_ACCENT } else { COLOR_FAINT };
+                            ui.label(egui::RichText::new(d).color(col).size(10.5));
+                        }
+                    });
+                });
+
+                // Bento 2: Focus Timer
+                ui.group(|ui| {
+                    ui.set_width(bento_w);
+                    ui.set_height(bento_h);
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(services.timer.formatted_remaining()).color(COLOR_WARM).size(14.0).strong());
+                        let p_label = if services.timer.is_running { "⏸" } else { "▶" };
+                        if ui.button(p_label).clicked() { services.timer.toggle_start_pause(); }
+                        if ui.button("+").clicked() { services.timer.add_minutes(5.0); }
+                    });
+                    ui.label(egui::RichText::new("25+5 min focus").color(COLOR_FAINT).size(10.5));
+                });
+            });
+
+            ui.add_space(4.0);
+
+            // Row 2: Weather & Telemetry
+            ui.horizontal(|ui| {
+                // Bento 3: Weather
+                ui.group(|ui| {
+                    ui.set_width(bento_w);
+                    ui.set_height(bento_h);
+                    ui.label(egui::RichText::new("⛅ 21°C Partly Cloudy").color(COLOR_INK).size(11.5));
+                    ui.label(egui::RichText::new("Cached location").color(COLOR_FAINT).size(10.0));
+                });
+
+                // Bento 4: Telemetry Stats
+                ui.group(|ui| {
+                    ui.set_width(bento_w);
+                    ui.set_height(bento_h);
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(format!("CPU {:.0}%", services.telemetry.cpu_usage)).color(COLOR_ACCENT).size(10.5));
+                        ui.label(egui::RichText::new(format!("RAM {:.1}G", services.telemetry.ram_used_gb)).color(COLOR_WARM).size(10.5));
+                        ui.label(egui::RichText::new(format!("{:.0} FPS", services.telemetry.fps)).color(COLOR_OK).size(10.5));
+                    });
+                    ui.label(egui::RichText::new("↓ 1.2 MB/s  ↑ 240 KB/s").color(COLOR_FAINT).size(10.0));
                 });
             });
         });
     }
 
-    fn render_file_shelf_tab(&mut self, ui: &mut Ui, services: &mut ServiceManager) {
+    // ==========================================
+    // TAB 7: CONTROLS (Sliders & Toggles, Image 8)
+    // ==========================================
+    fn render_tab_controls(&mut self, ui: &mut Ui, services: &mut ServiceManager) {
         ui.horizontal(|ui| {
-            // QR Code for Camera Pairing
+            // Two vertical pill sliders (Brightness & Volume)
             ui.vertical(|ui| {
-                let qr_matrix = &services.file_shelf.qr_matrix;
-                let qr_size = 90.0;
-                let (qr_rect, _resp) = ui.allocate_exact_size(vec2(qr_size, qr_size), Sense::hover());
-                let painter = ui.painter_at(qr_rect);
-                painter.rect_filled(qr_rect, Rounding::same(6.0), Color32::WHITE);
-
-                let n = qr_matrix.len();
-                if n > 0 {
-                    let cell = qr_size / n as f32;
-                    for y in 0..n {
-                        for x in 0..n {
-                            if qr_matrix[y][x] {
-                                painter.rect_filled(
-                                    Rect::from_min_size(
-                                        pos2(qr_rect.left() + x as f32 * cell, qr_rect.top() + y as f32 * cell),
-                                        vec2(cell + 0.3, cell + 0.3),
-                                    ),
-                                    Rounding::ZERO,
-                                    Color32::BLACK,
-                                );
-                            }
-                        }
-                    }
+                ui.label(egui::RichText::new("🔆").size(12.0));
+                let mut b = services.controls.brightness;
+                if ui.add(egui::Slider::new(&mut b, 0.0..=1.0).show_value(false).vertical().trailing_fill(true)).changed() {
+                    services.controls.set_brightness(b);
                 }
-                ui.label(egui::RichText::new("📱 Wi-Fi Download").color(COLOR_DIM).size(9.5));
+                ui.label(egui::RichText::new(format!("{}%", services.controls.brightness_percent())).color(COLOR_FAINT).size(9.5));
+            });
+
+            ui.add_space(4.0);
+
+            ui.vertical(|ui| {
+                ui.label(egui::RichText::new("🔊").size(12.0));
+                let mut v = services.controls.volume;
+                if ui.add(egui::Slider::new(&mut v, 0.0..=1.0).show_value(false).vertical().trailing_fill(true)).changed() {
+                    services.controls.set_volume(v);
+                }
+                ui.label(egui::RichText::new(format!("{}%", services.controls.volume_percent())).color(COLOR_FAINT).size(9.5));
             });
 
             ui.add_space(10.0);
 
+            // Right: 6 Toggle Tiles & Power Mode Pills
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Staged File Shelf").color(COLOR_INK).strong());
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button("🗑 Clear").clicked() {
-                            services.file_shelf.clear();
-                        }
-                    });
+                    toggle_chip(ui, &mut self.wifi_on, "📶 Wi-Fi");
+                    toggle_chip(ui, &mut self.bluetooth_on, "ᛒ Bluetooth");
+                    toggle_chip(ui, &mut self.night_light_on, "🌙 Night");
                 });
-
-                let items = services.file_shelf.get_items();
-                egui::ScrollArea::vertical().max_height(80.0).show(ui, |ui| {
-                    for item in items {
-                        ui.horizontal(|ui| {
-                            ui.label("📄");
-                            ui.label(egui::RichText::new(&item.name).color(COLOR_INK).size(11.0));
-                            ui.label(egui::RichText::new(format!("({})", item.formatted_size())).color(COLOR_FAINT).size(10.0));
-                        });
-                    }
-                });
-
-                if ui.button("➕ Stage Screenshot").clicked() {
-                    services.file_shelf.add_file("screenshot.png", vec![0x89, 0x50, 0x4E, 0x47]);
-                }
-            });
-        });
-    }
-
-    fn render_clipboard_tab(&mut self, ui: &mut Ui, services: &mut ServiceManager) {
-        ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("📋 Clipboard History").color(COLOR_INK).strong());
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("🗑 Clear Unpinned").clicked() {
-                    services.clipboard.clear_unpinned();
-                }
-            });
-        });
-
-        ui.add_space(4.0);
-
-        let snippets = services.clipboard.snippets.clone();
-        egui::ScrollArea::vertical().max_height(140.0).show(ui, |ui| {
-            if snippets.is_empty() {
-                ui.label(egui::RichText::new("No copied items yet. Copy text anywhere in Windows.").color(COLOR_FAINT));
-            }
-
-            for snip in snippets {
-                ui.horizontal(|ui| {
-                    let pin_icon = if snip.is_pinned { "📌" } else { "📍" };
-                    if ui.button(pin_icon).clicked() {
-                        services.clipboard.toggle_pin(snip.id);
-                    }
-
-                    ui.label(egui::RichText::new(snip.preview(32)).color(COLOR_INK).size(11.5));
-
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button("✕").clicked() {
-                            services.clipboard.remove(snip.id);
-                        }
-                        if ui.button("Copy").clicked() {
-                            services.clipboard.copy_to_clipboard(snip.id);
-                        }
-                    });
-                });
-            }
-        });
-    }
-
-    fn render_notes_tab(&mut self, ui: &mut Ui, services: &mut ServiceManager) {
-        ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("📝 Scratchpad").color(COLOR_INK).strong());
-            ui.label(
-                egui::RichText::new(format!(
-                    "• {} chars, {} words",
-                    services.notes.character_count(),
-                    services.notes.word_count()
-                ))
-                .color(COLOR_FAINT)
-                .size(10.5),
-            );
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("🗑 Clear").clicked() {
-                    services.notes.clear();
-                }
-            });
-        });
-
-        ui.add_space(4.0);
-        egui::ScrollArea::vertical().max_height(120.0).show(ui, |ui| {
-            ui.text_edit_multiline(&mut services.notes.content);
-        });
-    }
-
-    fn render_telemetry_tab(&mut self, ui: &mut Ui, services: &mut ServiceManager) {
-        ui.horizontal(|ui| {
-            // FPS Hero Badge
-            ui.vertical(|ui| {
-                ui.label(egui::RichText::new(format!("{:.0}", services.telemetry.fps)).color(COLOR_ACCENT).size(36.0).strong());
-                ui.label(egui::RichText::new("HARDWARE FPS").color(COLOR_FAINT).size(9.0));
-            });
-
-            ui.add_space(16.0);
-
-            ui.vertical(|ui| {
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("CPU").color(COLOR_INK).size(11.0));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(egui::RichText::new(format!("{:.1}%", services.telemetry.cpu_usage)).color(COLOR_ACCENT).strong());
-                    });
-                });
-                ui.add(egui::ProgressBar::new(services.telemetry.cpu_usage / 100.0).desired_height(5.0));
-
                 ui.add_space(2.0);
-
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("RAM").color(COLOR_INK).size(11.0));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(egui::RichText::new(format!("{:.1}G", services.telemetry.ram_used_gb)).color(COLOR_WARM));
-                    });
+                    toggle_chip(ui, &mut self.focus_assist_on, "🎯 Focus");
+                    let mut is_muted = services.controls.is_muted;
+                    if toggle_chip(ui, &mut is_muted, "🔇 Mute") {
+                        services.controls.toggle_mute();
+                    }
+                    toggle_chip(ui, &mut self.battery_saver_on, "🔋 Battery");
                 });
-                ui.add(egui::ProgressBar::new(services.telemetry.ram_usage_pct / 100.0).desired_height(5.0));
-
-                ui.add_space(4.0);
-
-                // Power Plans
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Power:").color(COLOR_DIM).size(10.5));
-                    if ui.selectable_label(self.power_plan == 0, "Balanced").clicked() {
-                        self.power_plan = 0;
-                    }
-                    if ui.selectable_label(self.power_plan == 1, "⚡ High").clicked() {
-                        self.power_plan = 1;
-                    }
-                    if ui.selectable_label(self.power_plan == 2, "🌱 Eco").clicked() {
-                        self.power_plan = 2;
-                    }
-                });
-            });
-        });
-    }
-
-    fn render_controls_tab(&mut self, ui: &mut Ui, services: &mut ServiceManager) {
-        ui.vertical(|ui| {
-            // Volume
-            ui.horizontal(|ui| {
-                let mute_icon = if services.controls.is_muted { "🔇" } else { "🔊" };
-                if ui.button(mute_icon).clicked() {
-                    services.controls.toggle_mute();
-                }
-                ui.label(egui::RichText::new("Volume").color(COLOR_INK).size(11.5));
-                let mut vol = services.controls.volume;
-                if ui.add(egui::Slider::new(&mut vol, 0.0..=1.0).show_value(false)).changed() {
-                    services.controls.set_volume(vol);
-                }
-                ui.label(egui::RichText::new(format!("{}%", services.controls.volume_percent())).color(COLOR_DIM).size(10.5));
-            });
-
-            // Brightness
-            ui.horizontal(|ui| {
-                ui.label("🔆");
-                ui.label(egui::RichText::new("Brightness").color(COLOR_INK).size(11.5));
-                let mut b = services.controls.brightness;
-                if ui.add(egui::Slider::new(&mut b, 0.0..=1.0).show_value(false)).changed() {
-                    services.controls.set_brightness(b);
-                }
-                ui.label(egui::RichText::new(format!("{}%", services.controls.brightness_percent())).color(COLOR_DIM).size(10.5));
-            });
-
-            ui.add_space(4.0);
-
-            // Microphone & CapsLock Indicators
-            ui.horizontal(|ui| {
-                let mic_label = if services.controls.is_mic_muted { "🔇 Mic Muted" } else { "🎙 Mic Active" };
-                let mic_color = if services.controls.is_mic_muted { COLOR_HOT } else { COLOR_OK };
-                if ui.add(egui::Button::new(egui::RichText::new(mic_label).color(mic_color)).fill(COLOR_GLASS)).clicked() {
-                    services.controls.toggle_mic_mute();
-                }
-
-                let caps_label = if services.indicators.caps_lock { "🔠 CAPS ON" } else { "🔤 Caps Off" };
-                ui.label(egui::RichText::new(caps_label).color(COLOR_DIM).size(11.0));
-            });
-
-            ui.add_space(4.0);
-
-            // Notch geometry & pet toggles
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Style:").color(COLOR_DIM).size(11.0));
-                if ui.selectable_label(self.notch_style == NotchStyle::FloatingIsland, "Island").clicked() {
-                    self.notch_style = NotchStyle::FloatingIsland;
-                }
-                if ui.selectable_label(self.notch_style == NotchStyle::BezelNotch, "Bezel Notch").clicked() {
-                    self.notch_style = NotchStyle::BezelNotch;
-                }
-
-                ui.add_space(10.0);
-                ui.checkbox(&mut self.show_pet, "🐾 Desktop Pet");
-                if self.show_pet {
-                    if ui.selectable_label(self.pet.kind == PetKind::Cat, "🐱 Cat").clicked() {
-                        self.pet.kind = PetKind::Cat;
-                    }
-                    if ui.selectable_label(self.pet.kind == PetKind::Bunny, "🐰 Bunny").clicked() {
-                        self.pet.kind = PetKind::Bunny;
-                    }
-                }
-            });
-        });
-    }
-
-    fn render_deck_tab(&mut self, ui: &mut Ui, services: &mut ServiceManager) {
-        ui.horizontal(|ui| {
-            // QR Code to pair mobile deck
-            ui.vertical(|ui| {
-                let qr = &services.deck_server.qr_matrix;
-                let qr_size = 90.0;
-                let (qr_rect, _resp) = ui.allocate_exact_size(vec2(qr_size, qr_size), Sense::hover());
-                let painter = ui.painter_at(qr_rect);
-                painter.rect_filled(qr_rect, Rounding::same(6.0), Color32::WHITE);
-
-                let n = qr.len();
-                if n > 0 {
-                    let cell = qr_size / n as f32;
-                    for y in 0..n {
-                        for x in 0..n {
-                            if qr[y][x] {
-                                painter.rect_filled(
-                                    Rect::from_min_size(
-                                        pos2(qr_rect.left() + x as f32 * cell, qr_rect.top() + y as f32 * cell),
-                                        vec2(cell + 0.3, cell + 0.3),
-                                    ),
-                                    Rounding::ZERO,
-                                    Color32::BLACK,
-                                );
-                            }
-                        }
-                    }
-                }
-                ui.label(egui::RichText::new("📱 Scan to Control").color(COLOR_DIM).size(9.5));
-            });
-
-            ui.add_space(12.0);
-
-            ui.vertical(|ui| {
-                ui.label(egui::RichText::new("NotchPixel Mobile Deck").color(COLOR_INK).strong());
-                ui.label(
-                    egui::RichText::new(format!("Port {} • {}", services.deck_server.port, services.deck_server.server_url))
-                        .color(COLOR_ACCENT)
-                        .size(11.0),
-                );
-
-                ui.add_space(4.0);
-                let connected = services
-                    .deck_server
-                    .connected_devices
-                    .read()
-                    .map(|c| *c > 0)
-                    .unwrap_or(false);
-                let status_text = if connected {
-                    "🟢 Phone Controller Connected"
-                } else {
-                    "⚪ Waiting for Phone Connection"
-                };
-                ui.label(egui::RichText::new(status_text).color(COLOR_OK).size(11.5));
 
                 ui.add_space(6.0);
+
+                // Power Mode Selector
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Power:").color(COLOR_FAINT).size(10.0));
+                    if ui.selectable_label(self.power_mode == 0, "🌱 Eco").clicked() { self.power_mode = 0; }
+                    if ui.selectable_label(self.power_mode == 1, "⚖ Balanced").clicked() { self.power_mode = 1; }
+                    if ui.selectable_label(self.power_mode == 2, "⚡ Best").clicked() { self.power_mode = 2; }
+                });
+            });
+        });
+    }
+
+    // ==========================================
+    // TAB 8: TOOLS (6-Dots, Image 9)
+    // ==========================================
+    fn render_tab_tools(&mut self, ui: &mut Ui, services: &mut ServiceManager) {
+        ui.vertical(|ui| {
+            // Quick action capture buttons
+            ui.horizontal(|ui| {
+                if ui.add(egui::Button::new("📸 Screenshot").fill(COLOR_GLASS).rounding(Rounding::same(8.0))).clicked() {
+                    services.tools.take_screenshot();
+                }
+                if ui.add(egui::Button::new("✂ Snip").fill(COLOR_GLASS).rounding(Rounding::same(8.0))).clicked() {
+                    services.tools.launch_snipping_tool();
+                }
+                let rec_label = if services.tools.is_recording {
+                    format!("⏹ Stop ({:02}:{:02})", services.tools.recording_seconds / 60, services.tools.recording_seconds % 60)
+                } else {
+                    "🎥 Record".to_string()
+                };
+                let rec_color = if services.tools.is_recording { COLOR_HOT } else { COLOR_INK };
+                if ui.add(egui::Button::new(egui::RichText::new(rec_label).color(rec_color)).fill(COLOR_GLASS).rounding(Rounding::same(8.0))).clicked() {
+                    services.tools.toggle_recording();
+                }
+            });
+
+            if let Some(status) = &services.tools.last_screenshot_status {
+                ui.label(egui::RichText::new(status).color(COLOR_OK).size(10.5));
+            }
+
+            ui.add_space(4.0);
+
+            // 6 Dashed App Slot Tiles (2x3)
+            let slot_w = (ui.available_width() - 12.0) / 3.0;
+            let slot_h = 36.0;
+
+            for row in 0..2 {
+                ui.horizontal(|ui| {
+                    for col in 0..3 {
+                        let idx = row * 3 + col;
+                        let label = if idx < services.tools.custom_tool_slots.len() {
+                            &services.tools.custom_tool_slots[idx]
+                        } else {
+                            "+ Add"
+                        };
+                        let btn = egui::Button::new(egui::RichText::new(label).color(COLOR_FAINT).size(10.5))
+                            .fill(Color32::TRANSPARENT)
+                            .stroke(Stroke::new(1.0_f32, COLOR_LINE_DASH))
+                            .rounding(Rounding::same(6.0))
+                            .min_size(vec2(slot_w, slot_h));
+                        ui.add(btn);
+                    }
+                });
+                ui.add_space(3.0);
+            }
+        });
+    }
+
+    // ==========================================
+    // TAB 9: DECK (Phone, Image 10)
+    // ==========================================
+    fn render_tab_deck(&mut self, ui: &mut Ui, services: &mut ServiceManager) {
+        ui.horizontal(|ui| {
+            let qr = &services.deck_server.qr_matrix;
+            let qr_size = 90.0;
+            let (qr_rect, _resp) = ui.allocate_exact_size(vec2(qr_size, qr_size), Sense::hover());
+            let painter = ui.painter_at(qr_rect);
+            painter.rect_filled(qr_rect, Rounding::same(6.0), Color32::WHITE);
+
+            let n = qr.len();
+            if n > 0 {
+                let cell = qr_size / n as f32;
+                for y in 0..n {
+                    for x in 0..n {
+                        if qr[y][x] {
+                            painter.rect_filled(
+                                Rect::from_min_size(
+                                    pos2(qr_rect.left() + x as f32 * cell, qr_rect.top() + y as f32 * cell),
+                                    vec2(cell + 0.3, cell + 0.3),
+                                ),
+                                Rounding::ZERO,
+                                Color32::BLACK,
+                            );
+                        }
+                    }
+                }
+            }
+
+            ui.add_space(10.0);
+
+            ui.vertical(|ui| {
+                ui.label(egui::RichText::new("Your phone, as a deck for this PC").color(COLOR_INK).size(12.5).strong());
                 ui.label(
-                    egui::RichText::new("Control media, sliders, haptics and macros directly from your smartphone browser.")
+                    egui::RichText::new("Scan on the same Wi-Fi to control media, sliders, and hotkeys.")
                         .color(COLOR_FAINT)
                         .size(10.5),
                 );
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    if ui.add(egui::Button::new("Turn on").fill(COLOR_ACCENT).rounding(Rounding::same(6.0))).clicked() {}
+                    if ui.button("Get the app").clicked() {}
+                });
             });
         });
     }
+
+    // ==========================================
+    // TAB 10: CALLS (Headset, Image 11)
+    // ==========================================
+    fn render_tab_calls(&mut self, ui: &mut Ui, services: &mut ServiceManager) {
+        ui.horizontal(|ui| {
+            // Large Hero Microphone Button
+            let is_mic_muted = services.calls.is_mic_muted;
+            let mic_color = if is_mic_muted { COLOR_HOT } else { COLOR_OK };
+            let mic_label = if is_mic_muted { "🔇 Mic Muted\nClick to unmute" } else { "🎙️ Mic On\nClick to mute" };
+
+            let hero_btn = egui::Button::new(
+                egui::RichText::new(mic_label).color(mic_color).size(11.5).strong(),
+            )
+            .fill(COLOR_GLASS)
+            .stroke(Stroke::new(1.2_f32, mic_color))
+            .rounding(Rounding::same(10.0))
+            .min_size(vec2(130.0, 78.0));
+
+            if ui.add(hero_btn).clicked() {
+                services.calls.toggle_mic();
+                services.controls.is_mic_muted = services.calls.is_mic_muted;
+            }
+
+            ui.add_space(10.0);
+
+            // Audio Device Dropdowns
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Speakers:").color(COLOR_DIM).size(11.0));
+                    let speaker_name = services.calls.speakers.get(services.calls.selected_speaker)
+                        .map(|s| s.name.as_str())
+                        .unwrap_or("Default Speaker");
+                    ComboBox::from_id_salt("speaker_select")
+                        .selected_text(speaker_name)
+                        .show_ui(ui, |ui| {
+                            for (idx, spk) in services.calls.speakers.iter().enumerate() {
+                                ui.selectable_value(&mut services.calls.selected_speaker, idx, &spk.name);
+                            }
+                        });
+                    let spk_test_label = if services.calls.is_testing_speaker { "Beep..." } else { "Test" };
+                    if ui.button(spk_test_label).clicked() { services.calls.test_speaker(); }
+                });
+
+                ui.add_space(4.0);
+
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Mic Array:").color(COLOR_DIM).size(11.0));
+                    let mic_name = services.calls.microphones.get(services.calls.selected_microphone)
+                        .map(|m| m.name.as_str())
+                        .unwrap_or("Default Mic");
+                    ComboBox::from_id_salt("mic_select")
+                        .selected_text(mic_name)
+                        .show_ui(ui, |ui| {
+                            for (idx, mic) in services.calls.microphones.iter().enumerate() {
+                                ui.selectable_value(&mut services.calls.selected_microphone, idx, &mic.name);
+                            }
+                        });
+                    let mic_test_label = if services.calls.is_testing_mic { "Listening" } else { "Test" };
+                    if ui.button(mic_test_label).clicked() { services.calls.toggle_test_mic(); }
+                });
+
+                ui.add_space(4.0);
+                let cam_label = if services.calls.camera_active { "📷 Camera Active" } else { "📷 Check camera" };
+                if ui.button(cam_label).clicked() {
+                    services.calls.check_camera();
+                }
+            });
+        });
+    }
+
+    // ==========================================
+    // SETTINGS VIEW (Image 12)
+    // ==========================================
+    fn render_settings_view(&mut self, ui: &mut Ui, services: &mut ServiceManager) {
+        ui.horizontal(|ui| {
+            // Left Sidebar
+            let categories = crate::services::SettingsCategory::all();
+
+            ui.vertical(|ui| {
+                ui.set_width(120.0);
+                for cat in categories {
+                    let is_active = services.settings.active_category == *cat;
+                    let (bg, col) = if is_active { (COLOR_GLASS_HI, COLOR_ACCENT) } else { (Color32::TRANSPARENT, COLOR_DIM) };
+                    let label = format!("{} {}", cat.icon(), cat.label());
+                    if ui.add(egui::Button::new(egui::RichText::new(label).color(col).size(10.5)).fill(bg)).clicked() {
+                        services.settings.active_category = *cat;
+                    }
+                }
+            });
+
+            ui.separator();
+
+            // Right Panel (General Settings)
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(format!("{} Settings", services.settings.active_category.label())).color(COLOR_INK).size(14.0).strong());
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("✕ Close").clicked() {
+                            self.show_settings = false;
+                            services.settings.is_window_open = false;
+                        }
+                    });
+                });
+
+                ui.add_space(8.0);
+
+                ui.horizontal(|ui| {
+                    ui.label("Language:");
+                    ui.label(egui::RichText::new(&services.settings.settings.language).color(COLOR_DIM));
+                });
+
+                ui.add_space(6.0);
+                if ui.checkbox(&mut services.settings.settings.run_at_startup, "Run NotchPixel at Windows sign-in").changed() {
+                    services.settings.save();
+                }
+                ui.add_space(4.0);
+                if ui.checkbox(&mut services.settings.settings.slim_under_maximized, "Show slim strip under maximized windows").changed() {
+                    services.settings.save();
+                }
+                ui.add_space(4.0);
+                ui.checkbox(&mut self.auto_expand_on_hover, "Open island on mouse hover");
+
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    ui.label("Surface Look:");
+                    if ui.selectable_label(self.surface == ThemeSurface::Black, "Black").clicked() {
+                        self.surface = ThemeSurface::Black;
+                        services.settings.settings.theme = "Pure Black".to_string();
+                        services.settings.save();
+                    }
+                    if ui.selectable_label(self.surface == ThemeSurface::Graphite, "Graphite").clicked() {
+                        self.surface = ThemeSurface::Graphite;
+                        services.settings.settings.theme = "Graphite".to_string();
+                        services.settings.save();
+                    }
+                    if ui.selectable_label(self.surface == ThemeSurface::Glass, "Glass").clicked() {
+                        self.surface = ThemeSurface::Glass;
+                        services.settings.settings.theme = "Glass".to_string();
+                        services.settings.save();
+                    }
+                    if ui.selectable_label(self.surface == ThemeSurface::Acrylic, "Acrylic").clicked() {
+                        self.surface = ThemeSurface::Acrylic;
+                        services.settings.settings.theme = "Acrylic".to_string();
+                        services.settings.save();
+                    }
+                });
+            });
+        });
+    }
+}
+
+fn toggle_chip(ui: &mut Ui, state: &mut bool, label: &str) -> bool {
+    let (bg, col) = if *state { (COLOR_ACCENT, Color32::BLACK) } else { (COLOR_GLASS, COLOR_DIM) };
+    let btn = egui::Button::new(egui::RichText::new(label).color(col).size(10.5))
+        .fill(bg)
+        .rounding(Rounding::same(6.0))
+        .min_size(vec2(80.0, 24.0));
+    let clicked = ui.add(btn).clicked();
+    if clicked { *state = !*state; }
+    clicked
 }
 
 #[cfg(test)]
@@ -968,7 +1236,7 @@ mod tests {
     fn test_ui_initial_state() {
         let ui = IslandUi::new();
         assert_eq!(ui.mode, IslandMode::Compact);
-        assert_eq!(ui.tab, CardTab::Media);
+        assert_eq!(ui.tab, CardTab::Music);
         assert_eq!(ui.notch_style, NotchStyle::FloatingIsland);
         assert!((ui.morph.width.target - 230.0).abs() < 1e-4);
         assert!((ui.morph.height.target - 38.0).abs() < 1e-4);
@@ -979,8 +1247,8 @@ mod tests {
         let mut ui = IslandUi::new();
         ui.set_mode(IslandMode::Expanded);
         assert_eq!(ui.mode, IslandMode::Expanded);
-        assert!((ui.morph.width.target - 480.0).abs() < 1e-4);
-        assert!((ui.morph.height.target - 230.0).abs() < 1e-4);
+        assert!((ui.morph.width.target - 540.0).abs() < 1e-4);
+        assert!((ui.morph.height.target - 280.0).abs() < 1e-4);
 
         ui.set_mode(IslandMode::Slim);
         assert_eq!(ui.mode, IslandMode::Slim);
