@@ -6,7 +6,7 @@ use notch_island::windowing::WindowManager;
 fn main() -> eframe::Result<()> {
     // Query primary monitor to calculate top-center screen position
     let win_mgr = WindowManager::new();
-    let monitor = win_mgr.monitor_bounds();
+    let _monitor = win_mgr.monitor_bounds();
     let (window_x, window_y) = win_mgr.calculate_top_center(WINDOW_WIDTH, WINDOW_HEIGHT);
 
     let native_options = eframe::NativeOptions {

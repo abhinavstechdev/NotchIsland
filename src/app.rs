@@ -57,7 +57,10 @@ impl App for NotchApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.frame_counter += 1;
 
-        // One-time initialization of Win32 window styles
+        // One-time initialization of authentic Geist fonts and Win32 window styles
+        if self.frame_counter == 1 {
+            crate::ui::configure_fonts(ctx);
+        }
         if !self.initialized || self.frame_counter < 10 {
             self.try_init_window();
         }

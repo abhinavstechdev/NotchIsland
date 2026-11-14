@@ -1,6 +1,36 @@
 //! Win32 Window Management for NotchIsland
 //! Handles top-center screen positioning, per-monitor DPI detection,
-//! topmost Z-order enforcement, and dynamic WS_EX_TRANSPARENT click-through toggling.
+//! topmost Z-order enforcement, dynamic WS_EX_TRANSPARENT click-through toggling,
+//! Notch vs Floating Island geometry modes, and CapsLock / NumLock popup alerts.
+
+use std::time::{Duration, Instant};
+
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum IslandGeometryMode {
+    /// Top-anchored bezel notch: upper boundary attached flush to physical bezel (top = 0)
+    BezelNotch,
+    /// Floating dynamic island detached with a top screen margin (default 12.0)
+    FloatingIsland { top_margin: f32 },
+}
+
+impl Default for IslandGeometryMode {
+    fn default() -> Self {
+        Self::FloatingIsland { top_margin: 12.0 }
+    }
+}
+
+impl IslandGeometryMode {
+    pub fn is_bezel(&self) -> bool {
+        matches!(self, Self::BezelNotch)
+    }
+
+    pub fn top_margin(&self) -> f32 {
+        match self {
+            Self::BezelNotch => 0.0,
+            Self::FloatingIsland { top_margin } => *top_margin,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MonitorBounds {
@@ -33,11 +63,124 @@ pub struct CursorPos {
     pub y: i32,
 }
 
+/// Win32 Lock Key Status (CapsLock, NumLock, ScrollLock)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LockKeyState {
+    pub caps_lock: bool,
+    pub num_lock: bool,
+    pub scroll_lock: bool,
+}
+
+impl Default for LockKeyState {
+    fn default() -> Self {
+        Self {
+            caps_lock: false,
+            num_lock: false,
+            scroll_lock: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LockKeyChange {
+    CapsLock(bool),
+    NumLock(bool),
+    ScrollLock(bool),
+}
+
+/// Monitors keyboard lock keys (CapsLock, NumLock) and provides timed popup notifications
+pub struct LockKeyMonitor {
+    last_state: LockKeyState,
+    active_popup: Option<(LockKeyChange, Instant)>,
+    popup_duration: Duration,
+}
+
+impl Default for LockKeyMonitor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl LockKeyMonitor {
+    pub fn new() -> Self {
+        let current = Self::query_system_lock_keys();
+        Self {
+            last_state: current,
+            active_popup: None,
+            popup_duration: Duration::from_millis(2200),
+        }
+    }
+
+    /// Query current hardware lock key states
+    pub fn query_system_lock_keys() -> LockKeyState {
+        #[cfg(windows)]
+        unsafe {
+            use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CAPITAL, VK_NUMLOCK, VK_SCROLL};
+            let caps = (GetKeyState(VK_CAPITAL as i32) & 1) != 0;
+            let num = (GetKeyState(VK_NUMLOCK as i32) & 1) != 0;
+            let scroll = (GetKeyState(VK_SCROLL as i32) & 1) != 0;
+            LockKeyState {
+                caps_lock: caps,
+                num_lock: num,
+                scroll_lock: scroll,
+            }
+        }
+
+        #[cfg(not(windows))]
+        LockKeyState::default()
+    }
+
+    /// Poll for changes in key state. Returns change event if a key was toggled.
+    pub fn update(&mut self) -> Option<LockKeyChange> {
+        let current = Self::query_system_lock_keys();
+        let mut change = None;
+
+        if current.caps_lock != self.last_state.caps_lock {
+            change = Some(LockKeyChange::CapsLock(current.caps_lock));
+        } else if current.num_lock != self.last_state.num_lock {
+            change = Some(LockKeyChange::NumLock(current.num_lock));
+        } else if current.scroll_lock != self.last_state.scroll_lock {
+            change = Some(LockKeyChange::ScrollLock(current.scroll_lock));
+        }
+
+        if let Some(chg) = change {
+            self.last_state = current;
+            self.active_popup = Some((chg, Instant::now()));
+        }
+
+        // Clean up expired popup
+        if let Some((_, start)) = self.active_popup {
+            if start.elapsed() >= self.popup_duration {
+                self.active_popup = None;
+            }
+        }
+
+        change
+    }
+
+    /// Get current active popup banner text and state, if any is visible
+    pub fn active_popup_banner(&self) -> Option<(&'static str, bool)> {
+        self.active_popup.map(|(chg, _)| match chg {
+            LockKeyChange::CapsLock(on) => ("CAPS LOCK", on),
+            LockKeyChange::NumLock(on) => ("NUM LOCK", on),
+            LockKeyChange::ScrollLock(on) => ("SCROLL LOCK", on),
+        })
+    }
+
+    pub fn last_state(&self) -> LockKeyState {
+        self.last_state
+    }
+}
+
 pub struct WindowManager {
     #[cfg(windows)]
     hwnd: Option<windows_sys::Win32::Foundation::HWND>,
     is_click_through: bool,
+    geometry_mode: IslandGeometryMode,
     monitor_bounds: MonitorBounds,
+    last_cursor_inside: Instant,
+    hover_exit_cooldown: Duration,
+    lock_keys: LockKeyMonitor,
 }
 
 impl Default for WindowManager {
@@ -53,7 +196,11 @@ impl WindowManager {
             #[cfg(windows)]
             hwnd: None,
             is_click_through: false,
+            geometry_mode: IslandGeometryMode::default(),
             monitor_bounds,
+            last_cursor_inside: Instant::now(),
+            hover_exit_cooldown: Duration::from_millis(180),
+            lock_keys: LockKeyMonitor::new(),
         }
     }
 
@@ -79,6 +226,24 @@ impl WindowManager {
         }
     }
 
+    /// Geometry mode getter & setter
+    pub fn geometry_mode(&self) -> IslandGeometryMode {
+        self.geometry_mode
+    }
+
+    pub fn set_geometry_mode(&mut self, mode: IslandGeometryMode) {
+        self.geometry_mode = mode;
+    }
+
+    /// Access the lock key monitor
+    pub fn lock_keys(&self) -> &LockKeyMonitor {
+        &self.lock_keys
+    }
+
+    pub fn lock_keys_mut(&mut self) -> &mut LockKeyMonitor {
+        &mut self.lock_keys
+    }
+
     /// Get current monitor bounds
     pub fn monitor_bounds(&self) -> MonitorBounds {
         self.monitor_bounds
@@ -101,7 +266,6 @@ impl WindowManager {
             };
             use windows_sys::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
 
-            // Query DPI scale via DC
             let hdc = GetDC(std::ptr::null_mut());
             let dpi_scale = if !hdc.is_null() {
                 let dpi_x = GetDeviceCaps(hdc, LOGPIXELSX as i32);
@@ -152,11 +316,16 @@ impl WindowManager {
         MonitorBounds::default()
     }
 
-    /// Calculate the top-center screen coordinates for a given window size
-    pub fn calculate_top_center(&self, window_width: f32, _window_height: f32) -> (f32, f32) {
+    /// Calculate the top-center screen coordinates for a given window size based on active GeometryMode
+    pub fn calculate_position(&self, window_width: f32, _window_height: f32) -> (f32, f32) {
         let x = self.monitor_bounds.left as f32 + (self.monitor_bounds.width as f32 - window_width) / 2.0;
-        let y = self.monitor_bounds.top as f32;
+        let y = self.monitor_bounds.top as f32 + self.geometry_mode.top_margin();
         (x, y)
+    }
+
+    /// Legacy helper for top center
+    pub fn calculate_top_center(&self, window_width: f32, window_height: f32) -> (f32, f32) {
+        self.calculate_position(window_width, window_height)
     }
 
     /// Get current global cursor position in screen coordinates
@@ -240,27 +409,43 @@ impl WindowManager {
     }
 
     /// Check if cursor is inside the interactive notch boundary
-    /// If cursor is inside: disable click-through (allow mouse interaction).
-    /// If cursor is outside: enable click-through (clicks pass through to apps underneath).
     pub fn update_proximity(&mut self, active_screen_rect: (f32, f32, f32, f32)) -> bool {
-        let (rx, ry, rw, rh) = active_screen_rect;
+        self.update_proximity_multi(&[active_screen_rect])
+    }
+
+    /// Check if cursor is inside ANY of multiple interactive screen regions (notch body, pet, popup banners)
+    /// Incorporates a subtle exit hysteresis cooldown to avoid input flickering near edges.
+    pub fn update_proximity_multi(&mut self, active_screen_rects: &[(f32, f32, f32, f32)]) -> bool {
+        let margin = 10.0;
+        let mut physically_inside = false;
+
         if let Some(cursor) = Self::get_cursor_pos() {
             let cx = cursor.x as f32;
             let cy = cursor.y as f32;
 
-            // Extra proximity margin (8px padding) to prevent edge flickers
-            let margin = 8.0;
-            let inside = cx >= (rx - margin)
-                && cx <= (rx + rw + margin)
-                && cy >= (ry - margin)
-                && cy <= (ry + rh + margin);
+            for &(rx, ry, rw, rh) in active_screen_rects {
+                if cx >= (rx - margin)
+                    && cx <= (rx + rw + margin)
+                    && cy >= (ry - margin)
+                    && cy <= (ry + rh + margin)
+                {
+                    physically_inside = true;
+                    break;
+                }
+            }
+        }
 
-            // Inside -> click-through = false (we want clicks)
-            // Outside -> click-through = true (pass through)
-            self.set_click_through(!inside);
-            inside
+        if physically_inside {
+            self.last_cursor_inside = Instant::now();
+            self.set_click_through(false); // Enable mouse interaction
+            true
         } else {
-            false
+            // Check debounce cooldown before locking window back into click-through mode
+            let within_cooldown = self.last_cursor_inside.elapsed() < self.hover_exit_cooldown;
+            if !within_cooldown {
+                self.set_click_through(true); // Pass through
+            }
+            within_cooldown
         }
     }
 
@@ -312,12 +497,20 @@ mod tests {
     }
 
     #[test]
-    fn test_top_center_calculation() {
-        let wm = WindowManager::new();
-        let (x, y) = wm.calculate_top_center(400.0, 50.0);
+    fn test_geometry_mode_positioning() {
+        let mut wm = WindowManager::new();
+
+        // Floating island with 12px margin
+        wm.set_geometry_mode(IslandGeometryMode::FloatingIsland { top_margin: 12.0 });
+        let (x, y) = wm.calculate_position(400.0, 50.0);
         let expected_x = (wm.monitor_bounds().width as f32 - 400.0) / 2.0;
         assert!((x - expected_x).abs() < 1.0);
-        assert_eq!(y, 0.0);
+        assert_eq!(y, 12.0);
+
+        // Bezel notch (top = 0)
+        wm.set_geometry_mode(IslandGeometryMode::BezelNotch);
+        let (_, y_notch) = wm.calculate_position(400.0, 50.0);
+        assert_eq!(y_notch, 0.0);
     }
 
     #[test]
@@ -330,5 +523,14 @@ mod tests {
 
         wm.set_click_through(false);
         assert!(!wm.is_click_through());
+    }
+
+    #[test]
+    fn test_lock_key_state_init() {
+        let monitor = LockKeyMonitor::new();
+        let state = monitor.last_state();
+        // Just verify it queries without panicking
+        let _ = state.caps_lock;
+        let _ = state.num_lock;
     }
 }
