@@ -5,6 +5,8 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
+using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using NotchIsland.Native;
@@ -27,14 +29,15 @@ namespace NotchIsland
 
         private bool _isExpanded = false;
         private bool _isMicMuted = false;
-        private double _seekSliderValue = 0;
         private bool _isDraggingSeek = false;
         private int _petAnimFrame = 0;
+        private double _visualizerPhase = 0;
+        private Grid? _currentActivePanel;
 
         public MainWindow()
         {
             InitializeComponent();
-            Closing += (s, e) => e.Cancel = true; // Never exit accidentally
+            Closing += (s, e) => e.Cancel = true;
         }
 
         private void Window_SourceInitialized(object sender, EventArgs e)
@@ -56,12 +59,12 @@ namespace NotchIsland
 
         private async void Window_Loaded(object sender, RoutedEventArgs e)
         {
-            // Bind collections
+            _currentActivePanel = PanelMusic;
+
             ShelfItemsControl.ItemsSource = FileShelfService.Items;
             ClipboardItemsControl.ItemsSource = _clipboard.Items;
             UpdateShelfStatus();
 
-            // Initialize Services
             await _media.InitializeAsync();
             _media.TrackChanged += OnTrackChanged;
             _media.PositionChanged += OnPositionChanged;
@@ -69,42 +72,40 @@ namespace NotchIsland
             _deckServer.Start();
             GenerateDeckQrCode();
 
-            // Fast Timer (100ms) for smooth progress, stopwatch, visualizer
-            _fastTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
+            // Fast Timer (60 FPS / 16ms animation loop)
+            _fastTimer = new DispatcherTimer(DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(16) };
             _fastTimer.Tick += FastTimer_Tick;
             _fastTimer.Start();
 
-            // Slow Timer (1000ms) for hardware, clock, clipboard
+            // Slow Timer (1000ms update loop)
             _slowTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
             _slowTimer.Tick += SlowTimer_Tick;
             _slowTimer.Start();
 
-            // Initial manual update
             SlowTimer_Tick(null, EventArgs.Empty);
             OnTrackChanged();
         }
 
-        #region Timers & Updates
+        #region Animation & Updates
         private void FastTimer_Tick(object? sender, EventArgs e)
         {
-            // Media progress tick
-            _media.Tick(0.1);
+            _media.Tick(0.016);
 
-            // Stopwatch tick
+            // Stopwatch
             if (_stopwatch.IsRunning)
             {
                 var ts = _stopwatch.Elapsed;
                 StopwatchDisplay.Text = $"{ts.Minutes:D2}:{ts.Seconds:D2}.{ts.Milliseconds / 100}";
             }
 
-            // Mini visualizer bounce
+            // Smooth Harmonic Equalizer Visualizer
+            _visualizerPhase += 0.15;
             if (_media.CurrentTrack.IsPlaying)
             {
-                var rnd = Random.Shared;
-                Bar1.Height = rnd.Next(6, 16);
-                Bar2.Height = rnd.Next(8, 20);
-                Bar3.Height = rnd.Next(5, 14);
-                Bar4.Height = rnd.Next(10, 22);
+                Bar1.Height = 5 + Math.Abs(Math.Sin(_visualizerPhase * 1.2)) * 12;
+                Bar2.Height = 7 + Math.Abs(Math.Sin(_visualizerPhase * 1.8 + 1.0)) * 14;
+                Bar3.Height = 4 + Math.Abs(Math.Sin(_visualizerPhase * 1.4 + 2.2)) * 11;
+                Bar4.Height = 8 + Math.Abs(Math.Sin(_visualizerPhase * 2.2 + 0.6)) * 15;
             }
             else
             {
@@ -114,27 +115,24 @@ namespace NotchIsland
                 Bar4.Height = 4;
             }
 
-            // Pet animation
-            _petAnimFrame = (_petAnimFrame + 1) % 20;
+            // Dynamic Pet
+            _petAnimFrame = (_petAnimFrame + 1) % 60;
             if (_petAnimFrame == 0) PillPet.Text = "(=^･ω･^=)";
-            else if (_petAnimFrame == 10) PillPet.Text = "(=^･ｪ･^=)";
+            else if (_petAnimFrame == 30) PillPet.Text = "(=^･ｪ･^=)";
         }
 
         private void SlowTimer_Tick(object? sender, EventArgs e)
         {
             var now = DateTime.Now;
 
-            // Clocks
             WidgetClock.Text = now.ToString("HH:mm:ss");
             WidgetDate.Text = now.ToString("dddd, MMMM dd, yyyy");
 
-            // Hardware update
             _hardware.Update();
             WidgetCpu.Text = $"CPU: {_hardware.Stats.CpuPercent}%";
             WidgetRam.Text = $"RAM: {_hardware.Stats.RamUsedGb} / {_hardware.Stats.RamTotalGb} GB";
             WidgetBattery.Text = $"{_hardware.Stats.BatteryPercent}% {(_hardware.Stats.IsCharging ? "⚡" : "")}";
 
-            // Pill Title & Battery
             PillBattery.Text = $"{_hardware.Stats.BatteryPercent}% {(_hardware.Stats.IsCharging ? "⚡" : "")}";
             if (!_isExpanded)
             {
@@ -148,10 +146,8 @@ namespace NotchIsland
                 }
             }
 
-            // Clipboard check
             _clipboard.CheckClipboard();
 
-            // Controls sync if not dragging
             VolumeSlider.Value = _hardware.Stats.Volume;
             VolumeLabel.Text = $"{_hardware.Stats.Volume}%";
             BrightnessSlider.Value = _hardware.Stats.Brightness;
@@ -195,20 +191,16 @@ namespace NotchIsland
         }
         #endregion
 
-        #region Island Expand & Collapse
-        private void Island_MouseEnter(object sender, MouseEventArgs e)
-        {
-            // Smoothly auto-expand on hover if preferred
-        }
+        #region Fluid Morphing Animation
+        private void Island_MouseEnter(object sender, MouseEventArgs e) { }
+        private void Island_MouseLeave(object sender, MouseEventArgs e) { }
 
-        private void Island_MouseLeave(object sender, MouseEventArgs e)
+        private void Island_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
-            // Stay open when in card mode until collapsed
-        }
-
-        private void Pill_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-        {
-            ExpandIsland();
+            if (!_isExpanded)
+            {
+                ExpandIsland();
+            }
         }
 
         private void CollapseBtn_Click(object sender, RoutedEventArgs e)
@@ -216,24 +208,66 @@ namespace NotchIsland
             CollapseIsland();
         }
 
-        private void ExpandIsland()
+        public void ExpandIsland()
         {
+            if (_isExpanded) return;
             _isExpanded = true;
-            PillBorder.Visibility = Visibility.Collapsed;
-            CardBorder.Visibility = Visibility.Visible;
-            UpdatePosition();
+
+            var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+            var duration = TimeSpan.FromMilliseconds(300);
+
+            // Morph Width & Height smoothly
+            var widthAnim = new DoubleAnimation(IslandContainer.ActualWidth, 560, duration) { EasingFunction = ease };
+            IslandContainer.BeginAnimation(WidthProperty, widthAnim);
+
+            var heightAnim = new DoubleAnimation(IslandContainer.ActualHeight, 270, duration) { EasingFunction = ease };
+            IslandContainer.BeginAnimation(HeightProperty, heightAnim);
+
+            // Fade Out Pill
+            var fadePill = new DoubleAnimation(PillContent.Opacity, 0, TimeSpan.FromMilliseconds(120)) { EasingFunction = ease };
+            PillContent.BeginAnimation(OpacityProperty, fadePill);
+
+            // Fade In Card Content
+            CardContent.IsHitTestVisible = true;
+            var fadeCard = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(200))
+            {
+                BeginTime = TimeSpan.FromMilliseconds(90),
+                EasingFunction = ease
+            };
+            CardContent.BeginAnimation(OpacityProperty, fadeCard);
         }
 
-        private void CollapseIsland()
+        public void CollapseIsland()
         {
+            if (!_isExpanded) return;
             _isExpanded = false;
-            CardBorder.Visibility = Visibility.Collapsed;
-            PillBorder.Visibility = Visibility.Visible;
-            UpdatePosition();
+
+            var ease = new CubicEase { EasingMode = EasingMode.EaseInOut };
+            var duration = TimeSpan.FromMilliseconds(260);
+
+            // Fade Out Card Content
+            CardContent.IsHitTestVisible = false;
+            var fadeCard = new DoubleAnimation(CardContent.Opacity, 0, TimeSpan.FromMilliseconds(90)) { EasingFunction = ease };
+            CardContent.BeginAnimation(OpacityProperty, fadeCard);
+
+            // Morph Width & Height back to Pill
+            var widthAnim = new DoubleAnimation(IslandContainer.ActualWidth, 320, duration) { EasingFunction = ease };
+            IslandContainer.BeginAnimation(WidthProperty, widthAnim);
+
+            var heightAnim = new DoubleAnimation(IslandContainer.ActualHeight, 40, duration) { EasingFunction = ease };
+            IslandContainer.BeginAnimation(HeightProperty, heightAnim);
+
+            // Fade In Pill Content
+            var fadePill = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(180))
+            {
+                BeginTime = TimeSpan.FromMilliseconds(80),
+                EasingFunction = ease
+            };
+            PillContent.BeginAnimation(OpacityProperty, fadePill);
         }
         #endregion
 
-        #region Navigation Tabs
+        #region Navigation Tabs with Slide & Fade Transitions
         private void Tab_Click(object sender, RoutedEventArgs e)
         {
             if (sender is Button btn && btn.Tag is string tabName)
@@ -244,30 +278,45 @@ namespace NotchIsland
 
         private void ShowPanel(string name)
         {
-            PanelMusic.Visibility = Visibility.Collapsed;
-            PanelShelf.Visibility = Visibility.Collapsed;
-            PanelClipboard.Visibility = Visibility.Collapsed;
-            PanelWidgets.Visibility = Visibility.Collapsed;
-            PanelControls.Visibility = Visibility.Collapsed;
-            PanelWeb.Visibility = Visibility.Collapsed;
-            PanelNotifications.Visibility = Visibility.Collapsed;
-            PanelTools.Visibility = Visibility.Collapsed;
-            PanelDeck.Visibility = Visibility.Collapsed;
-            PanelCalls.Visibility = Visibility.Collapsed;
-
-            switch (name)
+            Grid target = name switch
             {
-                case "Music": PanelMusic.Visibility = Visibility.Visible; break;
-                case "Shelf": PanelShelf.Visibility = Visibility.Visible; UpdateShelfStatus(); break;
-                case "Clipboard": PanelClipboard.Visibility = Visibility.Visible; break;
-                case "Widgets": PanelWidgets.Visibility = Visibility.Visible; break;
-                case "Controls": PanelControls.Visibility = Visibility.Visible; break;
-                case "Web": PanelWeb.Visibility = Visibility.Visible; break;
-                case "Notifications": PanelNotifications.Visibility = Visibility.Visible; break;
-                case "Tools": PanelTools.Visibility = Visibility.Visible; break;
-                case "Deck": PanelDeck.Visibility = Visibility.Visible; break;
-                case "Calls": PanelCalls.Visibility = Visibility.Visible; break;
+                "Music" => PanelMusic,
+                "Shelf" => PanelShelf,
+                "Clipboard" => PanelClipboard,
+                "Widgets" => PanelWidgets,
+                "Controls" => PanelControls,
+                "Web" => PanelWeb,
+                "Notifications" => PanelNotifications,
+                "Tools" => PanelTools,
+                "Deck" => PanelDeck,
+                "Calls" => PanelCalls,
+                _ => PanelMusic
+            };
+
+            if (_currentActivePanel == target) return;
+
+            if (_currentActivePanel != null)
+            {
+                _currentActivePanel.Visibility = Visibility.Collapsed;
             }
+
+            _currentActivePanel = target;
+            target.Visibility = Visibility.Visible;
+
+            if (name == "Shelf") UpdateShelfStatus();
+
+            // Fluid slide-up and fade-in transition
+            var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+            var fadeIn = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(180)) { EasingFunction = ease };
+            target.BeginAnimation(OpacityProperty, fadeIn);
+
+            if (target.RenderTransform is not TranslateTransform tt)
+            {
+                tt = new TranslateTransform();
+                target.RenderTransform = tt;
+            }
+            var slideUp = new DoubleAnimation(8, 0, TimeSpan.FromMilliseconds(180)) { EasingFunction = ease };
+            tt.BeginAnimation(TranslateTransform.YProperty, slideUp);
         }
 
         private void SettingsBtn_Click(object sender, RoutedEventArgs e)
@@ -473,7 +522,7 @@ namespace NotchIsland
             NotificationsStack.Children.Add(new TextBlock
             {
                 Text = "No notifications",
-                Foreground = System.Windows.Media.Brushes.Gray,
+                Foreground = Brushes.Gray,
                 FontSize = 12,
                 Margin = new Thickness(0, 10, 0, 0),
                 HorizontalAlignment = HorizontalAlignment.Center
@@ -545,13 +594,13 @@ namespace NotchIsland
             {
                 MicMuteIcon.Text = "🔇";
                 MicMuteStatus.Text = "Microphone MUTED (Click to Unmute)";
-                MicMuteCallBtn.Background = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFrom("#40FF3B30")!;
+                MicMuteCallBtn.Background = (Brush)new BrushConverter().ConvertFrom("#40FF3B30")!;
             }
             else
             {
                 MicMuteIcon.Text = "🎤";
                 MicMuteStatus.Text = "Microphone LIVE (Click to Mute)";
-                MicMuteCallBtn.Background = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFrom("#18FFFFFF")!;
+                MicMuteCallBtn.Background = (Brush)new BrushConverter().ConvertFrom("#16FFFFFF")!;
             }
         }
         #endregion
